@@ -1,0 +1,2289 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>자원 마스터: 분리배출 챌린지</title>
+<meta name="description" content="60초 동안 컨베이어 벨트를 따라 몰려오는 쓰레기를 올바른 9가지 수거함에 드래그하여 분리수거하는 교육용 게임" />
+
+<!-- Tailwind CSS (CDN으로 로드하여 단일 파일 실행 지원) -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Import Map: 브라우저가 bare import(react, motion/react 등)를 CDN(esm.sh)에서 바로 불러오도록 설정 -->
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@19.0.1",
+    "react/": "https://esm.sh/react@19.0.1/",
+    "react-dom/client": "https://esm.sh/react-dom@19.0.1/client?external=react",
+    "react/jsx-runtime": "https://esm.sh/react@19.0.1/jsx-runtime?external=react",
+    "motion/react": "https://esm.sh/motion@12.23.24/react?external=react,react-dom",
+    "lucide-react": "https://esm.sh/lucide-react@0.546.0?external=react",
+    "firebase/app": "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js",
+    "firebase/firestore": "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js"
+  }
+}
+</script>
+
+<style>
+  html, body { margin: 0; padding: 0; }
+  #root { min-height: 100vh; }
+  .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.5); border-radius: 999px; }
+  #boot-status {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px; font-family: system-ui, sans-serif; color: #475569;
+    background: #f8fafc; z-index: 9999;
+  }
+  #boot-status.hidden { display: none; }
+  .boot-spinner {
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 4px solid #d1fae5; border-top-color: #10b981;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-950">
+<div id="root"></div>
+<div id="boot-status">
+  <div class="boot-spinner"></div>
+  <div class="font-bold text-slate-700 text-sm">에코 분리배출 게임을 불러오는 중...</div>
+</div>
+
+<!-- 게임 메인 자바스크립트 코드 -->
+<script type="module">
+window.addEventListener('error', (e) => {
+  const bootStatus = document.getElementById('boot-status');
+  if (!bootStatus) return;
+  const msg = (e.error && e.error.stack) ? e.error.stack : (e.message || String(e));
+  bootStatus.innerHTML =
+    '<div style="max-width:640px;padding:24px;background:#fff;border-radius:24px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1); border:1px solid #e2e8f0; font-family:system-ui,sans-serif;">' +
+    '<div style="font-weight:900;color:#e11d48;font-size:16px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">⚠️ 오류가 발생했습니다</div>' +
+    '<p style="font-size:13px;color:#475569;margin-bottom:12px;line-height:1.6;">게임을 불러오는 도중 문제가 발생했습니다. 브라우저의 개발자 콘솔(F12)을 확인하시거나 인터넷 연결 상태를 점검해 주세요.</p>' +
+    '<pre style="white-space:pre-wrap;font-size:11px;background:#fff1f2;border:1px solid #fecdd3;padding:12px;border-radius:12px;color:#881337;max-height:40vh;overflow:auto;font-family:monospace;line-height:1.5;">' +
+    String(msg).replace(/</g, '&lt;') +
+    '</pre></div>';
+  bootStatus.classList.remove('hidden');
+});
+
+// src/main.tsx
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+
+// src/App.tsx
+import { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import {
+  Play,
+  Pause,
+  RotateCcw,
+  Volume2,
+  VolumeX,
+  Flame,
+  RefreshCw,
+  Heart,
+  Trash2,
+  Sparkles,
+  Award,
+  Home,
+  Trophy,
+  X,
+  AlertCircle,
+  ChevronLeft,
+  Check,
+  Gamepad2,
+  MoveHorizontal,
+  Apple,
+  Layers,
+  GlassWater,
+  Package,
+  FileText,
+  Wine,
+  BatteryCharging,
+  Truck,
+  BookOpen,
+  Globe,
+  HelpCircle,
+  Lock
+} from "lucide-react";
+import { initializeApp, getApp, getApps } from "firebase/app";
+import { getFirestore, collection, addDoc, setDoc, getDocs, query, orderBy, limit, onSnapshot, deleteDoc, doc } from "firebase/firestore";
+import { Fragment, jsx, jsxs } from "react/jsx-runtime";
+var WASTE_ITEMS = [
+  {
+    id: "pet_bottle",
+    name: "\uD22C\uBA85\uD398\uD2B8\uBCD1",
+    emoji: "\u{1F964}",
+    category: "\uD50C\uB77C\uC2A4\uD2F1\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* PLASTIC */,
+    description: "\uC0DD\uC218 \uBC0F \uC74C\uB8CC\uC6A9 \uD22C\uBA85 \uD398\uD2B8\uBCD1",
+    difficulty: "\uC26C\uC6C0",
+    tip: "\uB0B4\uC6A9\uBB3C\uC744 \uAE68\uB057\uC774 \uBE44\uC6B0\uACE0, \uB77C\uBCA8 \uC2A4\uD2F0\uCEE4\uB97C \uB5BC\uC5B4\uB0B8 \uB4A4 \uC555\uCC29\uD574\uC11C \uD50C\uB77C\uC2A4\uD2F1\uB958\uB85C \uBC30\uCD9C\uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "tin_can",
+    name: "\uD1B5\uC870\uB9BC\uCE94",
+    emoji: "\u{1F96B}",
+    category: "\uCE94\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* CAN */,
+    description: "\uCC38\uCE58\uCE94, \uC2A4\uD338\uCE94, \uD1B5\uC870\uB9BC \uC6A9\uAE30",
+    difficulty: "\uC26C\uC6C0",
+    tip: "\uB0B4\uC6A9\uBB3C\uC744 \uC644\uC804\uD788 \uBE44\uC6B0\uACE0 \uBB3C\uB85C \uD589\uAD70 \uD6C4 \uBC30\uCD9C\uD569\uB2C8\uB2E4. \uD50C\uB77C\uC2A4\uD2F1 \uB69C\uAED1\uC740 \uB530\uB85C \uBD84\uB9AC\uD574 \uC8FC\uC138\uC694."
+  },
+  {
+    id: "bicycle",
+    name: "\uD3D0\uC790\uC804\uAC70",
+    emoji: "\u{1F6B2}",
+    category: "\uB300\uD615 \uD3D0\uAE30\uBB3C" /* LARGE */,
+    description: "\uACE0\uC7A5 \uB098\uC11C \uC4F0\uC9C0 \uBABB\uD558\uB294 \uC790\uC804\uAC70",
+    difficulty: "\uBCF4\uD1B5",
+    tip: "\uBD80\uD53C\uAC00 \uD06C\uACE0 \uBD80\uD488 \uD63C\uD569\uC774 \uB9CE\uC740 \uD3D0\uC790\uC804\uAC70\uB294 \uB300\uD615 \uC0DD\uD65C \uD3D0\uAE30\uBB3C \uC2E0\uACE0 \uD6C4 \uC2A4\uD2F0\uCEE4\uB97C \uBD80\uCC29\uD574 \uBC30\uCD9C\uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "broken_glass",
+    name: "\uAE68\uC9C4\uC720\uB9AC\uBCD1",
+    emoji: "\u{1F37E}",
+    category: "\uC77C\uBC18 \uC4F0\uB808\uAE30" /* GENERAL */,
+    description: "\uAE08\uC774 \uAC00\uAC70\uB098 \uAE68\uC9C4 \uC720\uB9AC\uC6A9\uAE30",
+    difficulty: "\uC5B4\uB824\uC6C0",
+    tip: "\uAE68\uC9C4 \uC720\uB9AC\uB294 \uC7AC\uD65C\uC6A9\uC774 \uBD88\uAC00\uB2A5\uD569\uB2C8\uB2E4. \uC2E0\uBB38\uC9C0 \uB4F1\uC73C\uB85C \uAF3C\uAF3C\uD788 \uC2F8\uC11C \uC77C\uBC18 \uC4F0\uB808\uAE30(\uC885\uB7C9\uC81C)\uB85C \uBC84\uB824\uC57C \uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "toothbrush",
+    name: "\uCE6B\uC194",
+    emoji: "\u{1FAA5}",
+    category: "\uC77C\uBC18 \uC4F0\uB808\uAE30" /* GENERAL */,
+    description: "\uBCF5\uD569 \uC7AC\uC9C8\uB85C \uC81C\uC791\uB41C \uD50C\uB77C\uC2A4\uD2F1 \uCE6B\uC194",
+    difficulty: "\uC5B4\uB824\uC6C0",
+    tip: "\uCE6B\uC194\uC740 \uACE0\uBB34, \uD50C\uB77C\uC2A4\uD2F1, \uBBF8\uC138\uBAA8 \uB4F1 \uC5EC\uB7EC \uC7AC\uC9C8\uC774 \uC11E\uC5EC \uBD84\uB9AC\uAC00 \uC5B4\uB824\uC6B0\uBBC0\uB85C \uC77C\uBC18 \uC4F0\uB808\uAE30\uB85C \uBC84\uB9BD\uB2C8\uB2E4."
+  },
+  {
+    id: "tissue",
+    name: "\uC0AC\uC6A9\uD55C\uD734\uC9C0",
+    emoji: "\u{1F9FB}",
+    category: "\uC77C\uBC18 \uC4F0\uB808\uAE30" /* GENERAL */,
+    description: "\uBB3C\uD2F0\uC288 \uB610\uB294 \uC774\uBB3C\uC9C8\uC774 \uBB3B\uC740 \uD654\uC7A5\uC9C0",
+    difficulty: "\uC26C\uC6C0",
+    tip: "\uC624\uC5FC\uB418\uC5C8\uAC70\uB098 \uD55C \uBC88 \uC0AC\uC6A9\uB41C \uD734\uC9C0/\uBB3C\uD2F0\uC288\uB294 \uC7AC\uD65C\uC6A9\uC774 \uC808\uB300 \uBD88\uAC00\uD558\uBBC0\uB85C \uC77C\uBC18 \uC4F0\uB808\uAE30\uB85C \uBD84\uB9AC\uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "onion_peel",
+    name: "\uC591\uD30C\uAECD\uC9C8",
+    emoji: "\u{1F9C5}",
+    category: "\uC77C\uBC18 \uC4F0\uB808\uAE30" /* GENERAL */,
+    description: "\uC591\uD30C\uB098 \uB9C8\uB298\uC758 \uB9C8\uB978 \uAECD\uC9C8, \uBFCC\uB9AC",
+    difficulty: "\uC5B4\uB824\uC6C0",
+    tip: "\uC591\uD30C/\uB9C8\uB298\uC758 \uAECD\uC9C8\uC774\uB098 \uBFCC\uB9AC, \uB2EC\uAC40 \uAECD\uB370\uAE30\uB294 \uC12C\uC720\uC9C8\uC774 \uB9CE\uACE0 \uC601\uC591\uBD84\uC774 \uC5C6\uC5B4 \uB3D9\uBB3C\uC758 \uC0AC\uB8CC\uB85C \uC4F8 \uC218 \uC5C6\uC5B4 \uC77C\uBC18 \uC4F0\uB808\uAE30\uC785\uB2C8\uB2E4."
+  },
+  {
+    id: "battery",
+    name: "\uD3D0\uAC74\uC804\uC9C0",
+    emoji: "\u{1F50B}",
+    category: "\uAE30\uD0C0 \uC4F0\uB808\uAE30" /* OTHER */,
+    description: "\uC218\uBA85\uC774 \uB2E4\uD55C \uC54C\uCE7C\uB77C\uC778 \uAC74\uC804\uC9C0",
+    difficulty: "\uBCF4\uD1B5",
+    tip: "\uAC74\uC804\uC9C0\uC5D0\uB294 \uC911\uAE08\uC18D\uC774 \uD3EC\uD568\uB418\uC5B4 \uC788\uC5B4 \uB9E4\uB9BD \uC2DC \uD658\uACBD\uC624\uC5FC\uC744 \uC720\uBC1C\uD558\uBBC0\uB85C \uBC18\uB4DC\uC2DC \uC544\uD30C\uD2B8/\uB3D9\uC8FC\uBBFC\uC13C\uD130\uC758 \uC804\uC6A9 \uAC74\uC804\uC9C0 \uC218\uAC70\uD568\uC5D0 \uBC84\uB9BD\uB2C8\uB2E4."
+  },
+  {
+    id: "flyer",
+    name: "\uC804\uB2E8\uC9C0",
+    emoji: "\u{1F4C4}",
+    category: "\uC885\uC774\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* PAPER */,
+    description: "\uAC00\uC815\uC73C\uB85C \uBC30\uB2EC\uB41C \uC885\uC774 \uD64D\uBCF4\uBB3C",
+    difficulty: "\uC26C\uC6C0",
+    tip: "\uCF54\uD305\uC774 \uB418\uC5B4 \uC788\uC9C0 \uC54A\uC740 \uC77C\uBC18 \uC885\uC774 \uC804\uB2E8\uC9C0\uB294 \uC885\uC774\uB958 \uC7AC\uD65C\uC6A9\uC73C\uB85C \uBC30\uCD9C\uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "snack_bag",
+    name: "\uACFC\uC790\uBD09\uC9C0",
+    emoji: "\u{1F36C}",
+    category: "\uBE44\uB2D0\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* VINYL */,
+    description: "\uAC10\uC790\uCE69, \uB77C\uBA74 \uB4F1\uC758 \uBE44\uB2D0 \uD3EC\uC7A5\uC7AC",
+    difficulty: "\uBCF4\uD1B5",
+    tip: "\uB77C\uBA74\uBD09\uC9C0, \uACFC\uC790\uBD09\uC9C0\uB294 \uBE44\uB2D0\uB958 \uB9C8\uD06C\uAC00 \uC788\uC73C\uBBC0\uB85C \uC774\uBB3C\uC9C8\uC744 \uD138\uC5B4\uB0B4\uAC70\uB098 \uC53B\uC5B4\uC11C \uBE44\uB2D0\uB958\uB85C \uBD84\uB9AC \uBC30\uCD9C\uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "banana_peel",
+    name: "\uBC14\uB098\uB098\uAECD\uC9C8",
+    emoji: "\u{1F34C}",
+    category: "\uC74C\uC2DD\uBB3C \uC4F0\uB808\uAE30" /* FOOD */,
+    description: "\uBD80\uB4DC\uB7EC\uC6B4 \uACFC\uC77C \uAECD\uC9C8",
+    difficulty: "\uC26C\uC6C0",
+    tip: "\uBC14\uB098\uB098, \uC0AC\uACFC, \uC218\uBC15 \uB4F1 \uC218\uBD84\uC774 \uB9CE\uACE0 \uBD80\uB4DC\uB7EC\uC6B4 \uACFC\uC77C \uAECD\uC9C8\uC740 \uC0AC\uB8CC\uB85C \uAC00\uACF5\uC774 \uAC00\uB2A5\uD558\uC5EC \uC74C\uC2DD\uBB3C \uC4F0\uB808\uAE30\uB85C \uBC30\uCD9C\uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "fluorescent_lamp",
+    name: "\uD3D0\uD615\uAD11\uB4F1",
+    emoji: "\u{1F4A1}",
+    category: "\uAE30\uD0C0 \uC4F0\uB808\uAE30" /* OTHER */,
+    description: "\uC218\uBA85\uC774 \uB2E4\uD55C \uC77C\uC790\uD615/U\uC790\uD615 \uD615\uAD11\uB4F1",
+    difficulty: "\uBCF4\uD1B5",
+    tip: "\uC218\uC740 \uAC00\uC2A4\uAC00 \uB4E4\uC5B4\uC788\uC5B4 \uAE68\uC9C0\uBA74 \uC720\uD574\uD558\uBBC0\uB85C \uAE68\uC9C0\uC9C0 \uC54A\uC740 \uC0C1\uD0DC\uB85C \uBC18\uB4DC\uC2DC \uB3D9\uC8FC\uBBFC\uC13C\uD130 \uB4F1\uC758 \uD615\uAD11\uB4F1 \uC804\uC6A9 \uC218\uAC70\uD568\uC5D0 \uBC30\uCD9C\uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "old_clothes",
+    name: "\uD5CC\uC637",
+    emoji: "\u{1F455}",
+    category: "\uAE30\uD0C0 \uC4F0\uB808\uAE30" /* OTHER */,
+    description: "\uC720\uD589\uC774 \uC9C0\uB098\uAC70\uB098 \uC791\uC544\uC9C4 \uC758\uB958",
+    difficulty: "\uBCF4\uD1B5",
+    tip: "\uC785\uC744 \uC218 \uC788\uB294 \uD5CC\uC637\uC740 \uC544\uD30C\uD2B8\uB098 \uC8FC\uD0DD\uAC00 \uC8FC\uBCC0\uC758 '\uC758\uB958 \uC218\uAC70\uD568'\uC5D0 \uBD84\uB9AC \uBC30\uCD9C\uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "expired_medicine",
+    name: "\uD3D0\uC758\uC57D\uD488",
+    emoji: "\u{1F48A}",
+    category: "\uAE30\uD0C0 \uC4F0\uB808\uAE30" /* OTHER */,
+    description: "\uC720\uD6A8\uAE30\uAC04\uC774 \uC9C0\uB09C \uBB3C\uC57D, \uC54C\uC57D",
+    difficulty: "\uC5B4\uB824\uC6C0",
+    tip: "\uC57D \uC131\uBD84\uC774 \uC2F1\uD06C\uB300\uB098 \uD558\uC218\uAD6C\uB97C \uD1B5\uD574 \uD758\uB7EC\uAC00\uBA74 \uC0DD\uD0DC\uACC4\uB97C \uD30C\uAD34\uD558\uBBC0\uB85C \uBC18\uB4DC\uC2DC \uC57D\uAD6D\uC774\uB098 \uBCF4\uAC74\uC18C\uC758 \uC804\uC6A9 \uC218\uAC70\uD568\uC5D0 \uB123\uC5B4\uC57C \uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "sofa",
+    name: "\uC18C\uD30C",
+    emoji: "\u{1F6CB}\uFE0F",
+    category: "\uB300\uD615 \uD3D0\uAE30\uBB3C" /* LARGE */,
+    description: "\uB0A1\uC544\uC11C \uBC84\uB9AC\uB294 3\uC778\uC6A9 \uAC00\uC8FD \uC18C\uD30C",
+    difficulty: "\uC26C\uC6C0",
+    tip: "\uB300\uD615 \uAC00\uAD6C\uB958\uC778 \uC18C\uD30C\uB294 \uAD00\uD560 \uC8FC\uBBFC\uC13C\uD130\uB098 \uBAA8\uBC14\uC77C \uC571\uC744 \uD1B5\uD574 \uB300\uD615 \uD3D0\uAE30\uBB3C \uC218\uC218\uB8CC\uB97C \uB0A9\uBD80\uD558\uACE0 \uC2A4\uD2F0\uCEE4\uB97C \uBC1B\uC544 \uBC30\uCD9C\uD574\uC57C \uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "receipt",
+    name: "\uC601\uC218\uC99D",
+    emoji: "\u{1F9FE}",
+    category: "\uC77C\uBC18 \uC4F0\uB808\uAE30" /* GENERAL */,
+    description: "\uB9C8\uD2B8\uB098 \uCE74\uD398\uC5D0\uC11C \uBC1B\uC740 \uB300\uAE30\uD45C/\uC601\uC218\uC99D",
+    difficulty: "\uC5B4\uB824\uC6C0",
+    tip: "\uC601\uC218\uC99D \uC6A9\uC9C0\uB294 \uAC10\uC5F4\uC9C0\uB85C \uB2E4\uC591\uD55C \uD654\uD559\uBB3C\uC9C8\uC774 \uCF54\uD305\uB418\uC5B4 \uC788\uC5B4 \uC885\uC774\uB958\uB85C \uC7AC\uD65C\uC6A9\uD560 \uC218 \uC5C6\uC73C\uBBC0\uB85C \uC77C\uBC18 \uC4F0\uB808\uAE30\uB85C \uBD84\uB958\uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "ramen_bowl",
+    name: "\uCEF5\uB77C\uBA74\uC6A9\uAE30",
+    emoji: "\u{1F961}",
+    category: "\uC77C\uBC18 \uC4F0\uB808\uAE30" /* GENERAL */,
+    description: "\uBE68\uAC04 \uAD6D\uBB3C \uC790\uAD6D\uC774 \uAE4A\uAC8C \uBC34 \uC2A4\uD2F0\uB85C\uD3FC \uC6A9\uAE30",
+    difficulty: "\uC5B4\uB824\uC6C0",
+    tip: "\uC74C\uC2DD\uBB3C \uC5BC\uB8E9\uC774\uB098 \uAD6D\uBB3C \uC790\uAD6D\uC774 \uBE60\uC9C0\uC9C0 \uC54A\uB294 \uC2A4\uD2F0\uB85C\uD3FC \uC6A9\uAE30\uB098 \uCEF5\uB77C\uBA74 \uC6A9\uAE30\uB294 \uC7AC\uD65C\uC6A9 \uBD88\uAC00\uD558\uBA70 \uC77C\uBC18 \uC4F0\uB808\uAE30\uB85C \uBC84\uB9BD\uB2C8\uB2E4."
+  },
+  {
+    id: "bubble_wrap",
+    name: "\uC5D0\uC5B4\uCEA1",
+    emoji: "\u{1FAE7}",
+    category: "\uBE44\uB2D0\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* VINYL */,
+    description: "\uD0DD\uBC30 \uC644\uCDA9\uC6A9 \uBE44\uB2D0 \uC5D0\uC5B4\uCEA1",
+    difficulty: "\uBCF4\uD1B5",
+    tip: "\uACF5\uAE30\uB97C \uAD73\uC774 \uBE7C\uC9C0 \uC54A\uC544\uB3C4 \uD22C\uBA85\uD558\uACE0 \uAE68\uB057\uD558\uB2E4\uBA74 \uBE44\uB2D0\uB958 \uC7AC\uD65C\uC6A9 \uC218\uAC70\uD568\uC73C\uB85C \uBD84\uB9AC \uBC30\uCD9C\uC774 \uAC00\uB2A5\uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "egg_shell",
+    name: "\uB2EC\uAC40\uAECD\uB370\uAE30",
+    emoji: "\u{1F95A}",
+    category: "\uC77C\uBC18 \uC4F0\uB808\uAE30" /* GENERAL */,
+    description: "\uACC4\uB780, \uBA54\uCD94\uB9AC\uC54C \uB4F1 \uC54C \uAECD\uB370\uAE30",
+    difficulty: "\uC5B4\uB824\uC6C0",
+    tip: "\uCE7C\uC298 \uC131\uBD84\uC758 \uB531\uB531\uD55C \uACC4\uB780 \uAECD\uC9C8\uC740 \uAC00\uCD95\uC758 \uC18C\uD654 \uC7A5\uC560\uB97C \uC720\uBC1C\uD558\uBBC0\uB85C \uC74C\uC2DD\uBB3C \uC4F0\uB808\uAE30\uAC00 \uC544\uB2CC \uC77C\uBC18 \uC4F0\uB808\uAE30\uB85C \uBD84\uB958\uD574\uC57C \uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "greasy_pizza_paper",
+    name: "\uC624\uC5FC\uB41C \uBC15\uC2A4",
+    emoji: "\u{1F4E6}",
+    category: "\uC77C\uBC18 \uC4F0\uB808\uAE30" /* GENERAL */,
+    description: "\uD53C\uC790 \uAE30\uB984\uACFC \uC18C\uC2A4\uAC00 \uC794\uB729 \uBB3B\uC740 \uAE54\uAC1C \uC885\uC774",
+    difficulty: "\uBCF4\uD1B5",
+    tip: "\uAE30\uB984\uAE30\uB098 \uC74C\uC2DD\uBB3C\uC774 \uBB3B\uC5B4 \uC624\uC5FC\uB41C \uC885\uC774\uB294 \uC885\uC774\uB958\uB85C \uC7AC\uD65C\uC6A9\uD560 \uC218 \uC5C6\uC73C\uBBC0\uB85C \uC885\uB7C9\uC81C \uBD09\uD22C(\uC77C\uBC18 \uC4F0\uB808\uAE30)\uC5D0 \uB2F4\uC544 \uBC84\uB9BD\uB2C8\uB2E4."
+  },
+  {
+    id: "shampoo_bottle",
+    name: "\uC0F4\uD478\uD1B5",
+    emoji: "\u{1F9F4}",
+    category: "\uD50C\uB77C\uC2A4\uD2F1\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* PLASTIC */,
+    description: "\uC695\uC2E4\uC6A9 \uC0F4\uD478/\uB9B0\uC2A4 \uC6A9\uAE30",
+    difficulty: "\uBCF4\uD1B5",
+    tip: "\uD38C\uD504 \uD5E4\uB4DC \uC548\uC5D0\uB294 \uAE08\uC18D \uC2A4\uD504\uB9C1\uC774 \uC788\uC5B4 \uC2A4\uD504\uB9C1 \uD38C\uD504\uB294 \uC798\uB77C\uC11C \uC77C\uBC18\uC4F0\uB808\uAE30\uB85C \uBC84\uB9AC\uACE0 \uBCF8\uCCB4 \uC6A9\uAE30\uB9CC \uAE68\uB057\uC774 \uC53B\uC5B4 \uD50C\uB77C\uC2A4\uD2F1\uC73C\uB85C \uBC30\uCD9C\uD569\uB2C8\uB2E4."
+  },
+  {
+    id: "yogurt_bottle",
+    name: "요구르트병",
+    emoji: "\u{1F36E}",
+    category: "\uD50C\uB77C\uC2A4\uD2F1\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* PLASTIC */,
+    description: "작은 유산균 음료 플라스틱 용기",
+    difficulty: "쉬움",
+    tip: "요구르트병은 내용물을 비우고 물로 헹군 뒤 압착하여 플라스틱류로 배출합니다."
+  },
+  {
+    id: "detergent_bottle",
+    name: "세제통",
+    emoji: "\u{1F9F4}",
+    category: "\uD50C\uB77C\uC2A4\uD2F1\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* PLASTIC */,
+    description: "세탁 세제나 섬유유연제 용기",
+    difficulty: "보통",
+    tip: "세제통은 내용물을 비우고 헹군 뒤 펌프나 뚜껑을 분리해서 플라스틱류로 배출합니다."
+  },
+  {
+    id: "mayo_bottle",
+    name: "마요네즈통",
+    emoji: "\u{1FAD9}",
+    category: "\uD50C\uB77C\uC2A4\uD2F1\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* PLASTIC */,
+    description: "마요네즈, 케첩 등 소스 용기",
+    difficulty: "보통",
+    tip: "내용물을 깨끗이 비우고 헹궈서 배출하며, 이물질이 안 지워지면 일반 쓰레기로 버립니다."
+  },
+  {
+    id: "tuna_can",
+    name: "참치캔",
+    emoji: "\u{1F963}",
+    category: "\uCE94\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* CAN */,
+    description: "참치가 담긴 알루미늄 캔",
+    difficulty: "쉬움",
+    tip: "기름과 내용물을 비우고 물로 헹군 뒤 캔류로 배출합니다."
+  },
+  {
+    id: "butane_gas",
+    name: "부탄가스통",
+    emoji: "\u{1F6E2}\uFE0F",
+    category: "\uCE94\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* CAN */,
+    description: "휴대용 버너에 쓰는 가스 용기",
+    difficulty: "어려움",
+    tip: "반드시 야외에서 구멍을 뚫어 남은 가스를 완전히 제거한 후 캔류로 배출해야 폭발을 막을 수 있습니다."
+  },
+  {
+    id: "spray_can",
+    name: "스프레이캔",
+    emoji: "\u{1F4A8}",
+    category: "\uCE94\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* CAN */,
+    description: "헤어스프레이, 방향제 등 분사형 캔",
+    difficulty: "어려움",
+    tip: "남은 가스를 완전히 배출하고 구멍을 뚫은 뒤 캔류로 분리배출합니다. 잔여 가스는 화재 위험이 있습니다."
+  },
+  {
+    id: "newspaper",
+    name: "신문지",
+    emoji: "\u{1F4F0}",
+    category: "\uC885\uC774\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* PAPER */,
+    description: "다 읽은 신문",
+    difficulty: "쉬움",
+    tip: "신문지는 물기 없이 마른 상태로 끈으로 묶어 종이류로 배출합니다."
+  },
+  {
+    id: "milk_carton",
+    name: "우유팩",
+    emoji: "\u{1F95B}",
+    category: "\uC885\uC774\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* PAPER */,
+    description: "코팅된 종이 재질의 우유 용기",
+    difficulty: "보통",
+    tip: "우유팩은 일반 종이와 다른 재질이라 헹군 뒤 펼쳐 말려서 전용 종이팩 수거함에 배출해야 합니다."
+  },
+  {
+    id: "delivery_box",
+    name: "택배상자",
+    emoji: "\u{1F4E6}",
+    category: "\uC885\uC774\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* PAPER */,
+    description: "택배 배송용 골판지 상자",
+    difficulty: "쉬움",
+    tip: "택배 상자는 테이프와 운송장 스티커를 모두 떼어내고 납작하게 접어 종이류로 배출합니다."
+  },
+  {
+    id: "soda_bottle",
+    name: "음료수병",
+    emoji: "\u{1F9C3}",
+    category: "\uC720\uB9AC \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* GLASS */,
+    description: "유리로 된 탄산음료 용기",
+    difficulty: "쉬움",
+    tip: "라벨을 떼고 내용물을 비운 뒤 유리 재활용으로 배출합니다. 깨졌다면 일반 쓰레기입니다."
+  },
+  {
+    id: "glass_cup",
+    name: "유리컵",
+    emoji: "\u{1F942}",
+    category: "\uC720\uB9AC \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* GLASS */,
+    description: "깨지지 않은 멀쩡한 유리컵",
+    difficulty: "쉬움",
+    tip: "이가 나가지 않은 멀쩡한 유리컵은 헹궈서 유리류로 배출합니다. 깨졌다면 일반 쓰레기입니다."
+  },
+  {
+    id: "jam_jar",
+    name: "잼병",
+    emoji: "\u{1FAD9}",
+    category: "\uC720\uB9AC \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* GLASS */,
+    description: "잼이나 소스가 담긴 유리병",
+    difficulty: "보통",
+    tip: "내용물을 비우고 물로 헹군 뒤 금속 뚜껑은 분리해서 유리류로 배출합니다."
+  },
+  {
+    id: "ice_pack",
+    name: "아이스팩",
+    emoji: "\u{1F9CA}",
+    category: "\uC77C\uBC18 \uC4F0\uB808\uAE30" /* GENERAL */,
+    description: "보냉용 젤이 든 냉동 포장재",
+    difficulty: "어려움",
+    tip: "속 젤(고흡수성 폴리머)은 하수구에 버리면 안 되며, 내용물을 짜서 일반 쓰레기로 버리거나 지자체 재사용함에 반납합니다."
+  },
+  {
+    id: "fish_bone",
+    name: "생선뼈",
+    emoji: "\u{1F41F}",
+    category: "\uC77C\uBC18 \uC4F0\uB808\uAE30" /* GENERAL */,
+    description: "생선을 먹고 남은 딱딱한 뼈",
+    difficulty: "어려움",
+    tip: "생선뼈나 게·새우 껍질처럼 딱딱한 것은 동물 사료로 쓸 수 없어 음식물이 아닌 일반 쓰레기입니다."
+  },
+  {
+    id: "coffee_grounds",
+    name: "커피찌꺼기",
+    emoji: "\u2615",
+    category: "\uC77C\uBC18 \uC4F0\uB808\uAE30" /* GENERAL */,
+    description: "커피를 내리고 남은 원두 찌꺼기",
+    difficulty: "어려움",
+    tip: "커피 찌꺼기는 영양분이 없어 사료로 쓸 수 없으므로 음식물 쓰레기가 아닌 일반 쓰레기로 버립니다."
+  },
+  {
+    id: "broken_umbrella",
+    name: "고장난우산",
+    emoji: "\u2602\uFE0F",
+    category: "\uC77C\uBC18 \uC4F0\uB808\uAE30" /* GENERAL */,
+    description: "살이 부러져 못 쓰는 우산",
+    difficulty: "보통",
+    tip: "우산은 금속살과 천이 섞인 복합 재질이라 분리가 어려워 일반 쓰레기로 버립니다."
+  },
+  {
+    id: "old_glasses",
+    name: "폐안경",
+    emoji: "\u{1F453}",
+    category: "\uAE30\uD0C0 \uC4F0\uB808\uAE30" /* OTHER */,
+    description: "도수가 안 맞거나 부러진 안경",
+    difficulty: "보통",
+    tip: "쓸 수 있는 안경은 안경점의 폐안경 기부함에, 부서진 안경은 일반 쓰레기로 버립니다."
+  },
+  {
+    id: "old_phone",
+    name: "폐휴대폰",
+    emoji: "\u{1F4F1}",
+    category: "\uAE30\uD0C0 \uC4F0\uB808\uAE30" /* OTHER */,
+    description: "고장 나거나 안 쓰는 스마트폰",
+    difficulty: "보통",
+    tip: "소형 전자제품은 주민센터나 폐전자제품 전용 수거함에 배출해야 유해 물질 유출을 막을 수 있습니다."
+  },
+  {
+    id: "mattress",
+    name: "매트리스",
+    emoji: "\u{1F6CF}\uFE0F",
+    category: "\uB300\uD615 \uD3D0\uAE30\uBB3C" /* LARGE */,
+    description: "낡아서 버리는 침대 매트리스",
+    difficulty: "쉬움",
+    tip: "매트리스는 스프링과 천이 섞인 대형 폐기물로, 주민센터에 신고하고 스티커를 부착해 배출합니다."
+  },
+  {
+    id: "old_chair",
+    name: "낡은의자",
+    emoji: "\u{1FA91}",
+    category: "\uB300\uD615 \uD3D0\uAE30\uBB3C" /* LARGE */,
+    description: "부서지거나 낡은 사무용 의자",
+    difficulty: "쉬움",
+    tip: "부피가 큰 가구는 대형 생활 폐기물로 신고 후 수수료 스티커를 붙여 배출합니다."
+  },
+  {
+    id: "apple_core",
+    name: "사과심",
+    emoji: "\u{1F34E}",
+    category: "\uC74C\uC2DD\uBB3C \uC4F0\uB808\uAE30" /* FOOD */,
+    description: "사과를 먹고 남은 속과 씨",
+    difficulty: "쉬움",
+    tip: "사과, 배 등 부드러운 과일 속살은 사료로 가공 가능해 음식물 쓰레기로 배출합니다."
+  },
+  {
+    id: "vinyl_gloves",
+    name: "비닐장갑",
+    emoji: "\u{1F9E4}",
+    category: "\uBE44\uB2D0\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* VINYL */,
+    description: "요리할 때 쓰는 일회용 비닐장갑",
+    difficulty: "보통",
+    tip: "이물질이 없는 깨끗한 비닐장갑은 비닐류로, 음식물이 묻었다면 일반 쓰레기로 버립니다."
+  }
+];
+var firebaseConfig = {
+  apiKey: "AIzaSyB9EGXrmr7gDRf8mB2kYpwmSyTKUAdD4oc",
+  authDomain: "gen-lang-client-0607337181.firebaseapp.com",
+  projectId: "gen-lang-client-0607337181",
+  storageBucket: "gen-lang-client-0607337181.firebasestorage.app",
+  messagingSenderId: "492538377364",
+  appId: "1:492538377364:web:6951a10a15b66db2267081"
+};
+var isFirebaseConfigured = firebaseConfig.apiKey && !firebaseConfig.apiKey.includes("PLACEHOLDER") && firebaseConfig.projectId && !firebaseConfig.projectId.includes("PLACEHOLDER");
+var db = null;
+if (isFirebaseConfigured) {
+  try {
+    const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+    const databaseId = "ai-studio-3ae0411a-f546-4dec-a673-c7e8df38aa42";
+    db = getFirestore(app, databaseId);
+    console.log("Firebase\uAC00 \uC815\uC0C1\uC801\uC73C\uB85C \uAC10\uC9C0\uB418\uC5B4 \uC2E4\uC2DC\uAC04 \uD30C\uC774\uC5B4\uBCA0\uC774\uC2A4 DB\uB97C \uD65C\uC131\uD654\uD569\uB2C8\uB2E4. (DB: " + databaseId + ")");
+  } catch (error) {
+    console.error("Firebase \uCD08\uAE30\uD654 \uC911 \uC5D0\uB7EC\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4. \uB85C\uCEEC\uC2A4\uD1A0\uB9AC\uC9C0 \uBAA8\uB4DC\uB85C \uC791\uB3D9\uD569\uB2C8\uB2E4:", error);
+  }
+} else {
+  console.log("Firebase \uC124\uC815\uC774 \uBE44\uC5B4\uC788\uAC70\uB098 \uD50C\uB808\uC774\uC2A4\uD640\uB354 \uC0C1\uD0DC\uC785\uB2C8\uB2E4. \uB85C\uCEEC \uC2A4\uD1A0\uB9AC\uC9C0(LocalStorage) \uBAA8\uB4DC\uB85C \uC548\uC804\uD558\uAC8C \uC791\uB3D9\uD569\uB2C8\uB2E4.");
+}
+function handleFirestoreError(error, operationType, path) {
+  const errInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: null,
+      email: null
+    },
+    operationType,
+    path
+  };
+  console.error("Firestore Error: ", JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+var LOCAL_LEADERBOARD_KEY = "waste_sorting_game_leaderboard";
+function getLocalLeaderboard() {
+  const data = localStorage.getItem(LOCAL_LEADERBOARD_KEY);
+  if (!data) return getMockLeaderboard();
+  try {
+    return JSON.parse(data);
+  } catch (e) {
+    return getMockLeaderboard();
+  }
+}
+function saveLocalLeaderboard(entries) {
+  localStorage.setItem(LOCAL_LEADERBOARD_KEY, JSON.stringify(entries));
+}
+function getMockLeaderboard() {
+  const mockData = [
+    { name: "\uBD84\uB9AC\uBC30\uCD9C\uACE0\uC218", score: 1250, attempts: 24, accuracy: 95, date: "2026-07-08" },
+    { name: "\uC5D0\uCF54\uC6CC\uB9AC\uC5B4", score: 1080, attempts: 22, accuracy: 90, date: "2026-07-07" },
+    { name: "\uCD08\uB85D\uC9C0\uAD6C\uC778", score: 960, attempts: 20, accuracy: 85, date: "2026-07-08" },
+    { name: "\uC9C0\uAD6C\uC0B4\uB9AC\uBBF8", score: 840, attempts: 18, accuracy: 88, date: "2026-07-06" },
+    { name: "\uC7AC\uD65C\uC6A9\uB9C8\uC2A4\uD130", score: 720, attempts: 16, accuracy: 81, date: "2026-07-08" }
+  ];
+  localStorage.setItem(LOCAL_LEADERBOARD_KEY, JSON.stringify(mockData));
+  return mockData;
+}
+async function saveLeaderboardEntry(entry) {
+  const cleanEntry = {
+    name: entry.name,
+    score: entry.score,
+    attempts: entry.attempts,
+    accuracy: entry.accuracy,
+    date: entry.date
+  };
+  if (isFirebaseConfigured && db) {
+    const path = "leaderboard";
+    try {
+      if (entry.id) {
+        await setDoc(doc(db, path, entry.id), cleanEntry);
+      } else {
+        await addDoc(collection(db, path), cleanEntry);
+      }
+      console.log("Firebase Firestore\uC5D0 \uB7AD\uD0B9\uC774 \uC131\uACF5\uC801\uC73C\uB85C \uB4F1\uB85D\uB418\uC5C8\uC2B5\uB2C8\uB2E4.");
+    } catch (error) {
+      handleFirestoreError(error, "write" /* WRITE */, path);
+    }
+  } else {
+    const localList = getLocalLeaderboard();
+    if (entry.id) {
+      const existingIndex = localList.findIndex((e) => e.id === entry.id);
+      if (existingIndex !== -1) {
+        localList[existingIndex] = { ...cleanEntry, id: entry.id };
+      } else {
+        localList.push({ ...cleanEntry, id: entry.id });
+      }
+    } else {
+      localList.push(cleanEntry);
+    }
+    localList.sort((a, b) => b.score - a.score);
+    saveLocalLeaderboard(localList.slice(0, 100));
+    console.log("\uB85C\uCEEC \uC2A4\uD1A0\uB9AC\uC9C0\uC5D0 \uB7AD\uD0B9\uC774 \uC131\uACF5\uC801\uC73C\uB85C \uB4F1\uB85D\uB418\uC5C8\uC2B5\uB2C8\uB2E4.");
+  }
+}
+function isUsingFirebase() {
+  return isFirebaseConfigured && db !== null;
+}
+function subscribeToLeaderboard(callback) {
+  if (isFirebaseConfigured && db) {
+    const path = "leaderboard";
+    const q = query(collection(db, path), orderBy("score", "desc"), limit(20));
+    try {
+      const unsubscribe = onSnapshot(q, (querySnapshot) => {
+        const entries = [];
+        querySnapshot.forEach((doc2) => {
+          const data = doc2.data();
+          entries.push({
+            id: doc2.id,
+            name: data.name || "\uC775\uBA85",
+            score: data.score || 0,
+            attempts: data.attempts || 0,
+            accuracy: data.accuracy || 0,
+            date: data.date || ""
+          });
+        });
+        if (entries.length === 0) {
+          callback(getLocalLeaderboard());
+        } else {
+          callback(entries);
+        }
+      }, (error) => {
+        console.error("Firebase \uC2E4\uC2DC\uAC04 \uAD6C\uB3C5 \uC5D0\uB7EC:", error);
+        callback(getLocalLeaderboard());
+        handleFirestoreError(error, "get" /* GET */, path);
+      });
+      return unsubscribe;
+    } catch (error) {
+      console.error("Firebase \uC2E4\uC2DC\uAC04 \uAD6C\uB3C5 \uC2DC\uC791 \uC2E4\uD328:", error);
+      callback(getLocalLeaderboard());
+      return () => {
+      };
+    }
+  } else {
+    callback(getLocalLeaderboard().sort((a, b) => b.score - a.score));
+    return () => {
+    };
+  }
+}
+async function clearLeaderboard() {
+  localStorage.setItem(LOCAL_LEADERBOARD_KEY, JSON.stringify([]));
+  if (isFirebaseConfigured && db) {
+    const path = "leaderboard";
+    try {
+      const q = query(collection(db, path));
+      const querySnapshot = await getDocs(q);
+      const deletePromises = [];
+      querySnapshot.forEach((document2) => {
+        deletePromises.push(deleteDoc(doc(db, path, document2.id)));
+      });
+      await Promise.all(deletePromises);
+      console.log("Firebase Firestore \uB7AD\uD0B9\uC774 \uC131\uACF5\uC801\uC73C\uB85C \uCD08\uAE30\uD654\uB418\uC5C8\uC2B5\uB2C8\uB2E4.");
+    } catch (error) {
+      console.error("Firebase \uB7AD\uD0B9 \uCD08\uAE30\uD654 \uC2E4\uD328:", error);
+      throw error;
+    }
+  }
+}
+function NicknameModal({ onStartGame }) {
+  const [step, setStep] = useState("nickname");
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  const [selectedDifficulty, setSelectedDifficulty] = useState("medium");
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const handleNicknameSubmit = (e) => {
+    e.preventDefault();
+    let trimmedName = name.trim();
+    if (!trimmedName) {
+      trimmedName = "\uC9C0\uAD6C\uC218\uD638\uC790";
+      setName("\uC9C0\uAD6C\uC218\uD638\uC790");
+    }
+    if (trimmedName.length > 10) {
+      setError("\uC774\uB984\uC740 10\uC790 \uC774\uB0B4\uB85C \uC785\uB825\uD574 \uC8FC\uC138\uC694.");
+      return;
+    }
+    setStep("difficulty");
+  };
+  const handleStart = () => {
+    const finalName = name.trim() || "\uC9C0\uAD6C\uC218\uD638\uC790";
+    onStartGame(finalName, selectedDifficulty);
+  };
+  return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm", children: [
+    /* @__PURE__ */ jsxs(
+      motion.div,
+      {
+        initial: { opacity: 0, scale: 0.9, y: 20 },
+        animate: { opacity: 1, scale: 1, y: 0 },
+        transition: { type: "spring", duration: 0.5 },
+        className: "w-full max-w-md overflow-hidden bg-white rounded-3xl shadow-2xl border border-slate-100",
+        children: [
+          /* @__PURE__ */ jsxs("div", { className: "relative p-8 text-center text-white bg-slate-800", children: [
+            /* @__PURE__ */ jsx("div", { className: "absolute top-3 right-3 opacity-10", children: /* @__PURE__ */ jsx(Trash2, { size: 120 }) }),
+            /* @__PURE__ */ jsx(
+              motion.div,
+              {
+                initial: { rotate: -10, scale: 0.8 },
+                animate: { rotate: 0, scale: 1 },
+                transition: { delay: 0.2, type: "spring" },
+                className: "inline-flex items-center justify-center w-16 h-16 mb-4 bg-emerald-500 rounded-2xl",
+                children: /* @__PURE__ */ jsx("span", { className: "text-3xl", children: "\u267B\uFE0F" })
+              }
+            ),
+            /* @__PURE__ */ jsx("h1", { className: "text-2xl font-black tracking-tight mb-1 text-slate-100", children: "\uC790\uC6D0 \uB9C8\uC2A4\uD130: \uBD84\uB9AC\uBC30\uCD9C \uCC4C\uB9B0\uC9C0" }),
+            /* @__PURE__ */ jsx("p", { className: "text-slate-400 text-xs font-medium", children: step === "nickname" ? "\uC774\uB984\uC744 \uC785\uB825\uD558\uACE0 \uBD84\uB9AC\uBC30\uCD9C \uC655\uC774 \uB418\uC5B4\uBCF4\uC138\uC694!" : "\uC6D0\uD558\uB294 \uAC8C\uC784 \uB09C\uC774\uB3C4\uB97C \uC120\uD0DD\uD574 \uC8FC\uC138\uC694!" })
+          ] }),
+          /* @__PURE__ */ jsx("div", { className: "p-8", children: /* @__PURE__ */ jsx(AnimatePresence, { mode: "wait", children: step === "nickname" ? /* @__PURE__ */ jsxs(
+            motion.form,
+            {
+              initial: { opacity: 0, x: -20 },
+              animate: { opacity: 1, x: 0 },
+              exit: { opacity: 0, x: 20 },
+              onSubmit: handleNicknameSubmit,
+              className: "space-y-5",
+              children: [
+                /* @__PURE__ */ jsxs("div", { className: "space-y-2", children: [
+                  /* @__PURE__ */ jsx("label", { htmlFor: "nickname", className: "block text-xs font-bold uppercase tracking-wider text-slate-500", children: "\uD50C\uB808\uC774\uC5B4 \uB2C9\uB124\uC784" }),
+                  /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+                    /* @__PURE__ */ jsx(
+                      "input",
+                      {
+                        id: "nickname",
+                        type: "text",
+                        value: name,
+                        onChange: (e) => {
+                          setName(e.target.value);
+                          setError("");
+                        },
+                        maxLength: 10,
+                        placeholder: "\uC9C0\uAD6C\uC218\uD638\uC790",
+                        className: "w-full px-5 py-4 text-base font-bold transition-all bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 focus:bg-white text-slate-800",
+                        autoFocus: true
+                      }
+                    ),
+                    /* @__PURE__ */ jsxs("span", { className: "absolute right-4 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-mono", children: [
+                      name.length,
+                      "/10"
+                    ] })
+                  ] }),
+                  error && /* @__PURE__ */ jsxs(
+                    motion.div,
+                    {
+                      initial: { opacity: 0, y: -5 },
+                      animate: { opacity: 1, y: 0 },
+                      className: "flex items-center gap-1.5 text-rose-600 text-xs font-semibold",
+                      children: [
+                        /* @__PURE__ */ jsx(AlertCircle, { size: 14 }),
+                        /* @__PURE__ */ jsx("span", { children: error })
+                      ]
+                    }
+                  )
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "p-4 bg-emerald-50/50 border border-emerald-100/80 rounded-2xl text-emerald-800 text-[11px] leading-relaxed space-y-1.5", children: [
+                  /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1 font-bold text-emerald-900 text-xs", children: [
+                    /* @__PURE__ */ jsx(Award, { size: 14 }),
+                    /* @__PURE__ */ jsx("span", { children: "\uD575\uC2EC \uAC8C\uC784 \uBC29\uBC95" })
+                  ] }),
+                  /* @__PURE__ */ jsxs("p", { children: [
+                    "\u23F1\uFE0F ",
+                    /* @__PURE__ */ jsx("strong", { children: "\uC81C\uD55C\uC2DC\uAC04 60\uCD08" }),
+                    " \uB3D9\uC548 \uBCA8\uD2B8\uB97C \uD0C0\uACE0 \uC624\uB294 \uC4F0\uB808\uAE30\uB97C \uC54C\uB9DE\uC740 \uC218\uAC70\uD568\uC73C\uB85C ",
+                    /* @__PURE__ */ jsx("strong", { children: "\uB4DC\uB798\uADF8&\uB4DC\uB86D" }),
+                    "\uD558\uC138\uC694. (\uD074\uB9AD \uBC30\uCD9C\uB3C4 \uC9C0\uC6D0)"
+                  ] }),
+                  /* @__PURE__ */ jsxs("p", { children: [
+                    "\u2714\uFE0F \uC815\uB2F5 \uC218\uAC70: ",
+                    /* @__PURE__ */ jsx("strong", { children: "+60\uC810" }),
+                    " | \u274C \uC624\uB2F5: ",
+                    /* @__PURE__ */ jsx("strong", { children: "-30\uC810" }),
+                    " | \u{1F6A8} \uBBF8\uCC98\uB9AC \uC774\uD0C8: ",
+                    /* @__PURE__ */ jsx("strong", { children: "-20\uC810" })
+                  ] }),
+                  /* @__PURE__ */ jsxs("p", { children: [
+                    "\u{1F525} ",
+                    /* @__PURE__ */ jsx("strong", { children: "10\uC5F0\uC18D \uC815\uB2F5 \uC131\uACF5 \uC2DC" }),
+                    " \uCF64\uBCF4 \uBCF4\uB108\uC2A4 ",
+                    /* @__PURE__ */ jsx("strong", { children: "+30\uC810" }),
+                    " \uCD94\uAC00 \uD68D\uB4DD!"
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsxs(
+                  "button",
+                  {
+                    type: "submit",
+                    className: "w-full py-4 text-base font-bold text-white transition-all bg-emerald-500 rounded-2xl hover:bg-emerald-600 active:scale-98 shadow-lg shadow-emerald-200 flex items-center justify-center gap-2 cursor-pointer",
+                    children: [
+                      "\uB2E4\uC74C \uB2E8\uACC4\uB85C",
+                      /* @__PURE__ */ jsx(Sparkles, { size: 16, className: "animate-pulse" })
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxs(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => setShowLeaderboard(true),
+                    className: "w-full py-3 text-xs font-bold text-slate-600 hover:text-slate-900 border border-slate-200 rounded-2xl hover:bg-slate-50 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm hover:shadow active:scale-99",
+                    children: [
+                      /* @__PURE__ */ jsx(Trophy, { size: 14, className: "text-amber-500 animate-pulse" }),
+                      "\uC2E4\uC2DC\uAC04 \uB7AD\uD0B9 \uD655\uC778"
+                    ]
+                  }
+                )
+              ]
+            },
+            "nickname-step"
+          ) : /* @__PURE__ */ jsxs(
+            motion.div,
+            {
+              initial: { opacity: 0, x: 20 },
+              animate: { opacity: 1, x: 0 },
+              exit: { opacity: 0, x: -20 },
+              className: "space-y-6",
+              children: [
+                /* @__PURE__ */ jsxs("div", { className: "space-y-3", children: [
+                  /* @__PURE__ */ jsx("span", { className: "block text-xs font-bold uppercase tracking-wider text-slate-500", children: "\uB09C\uC774\uB3C4 \uC120\uD0DD" }),
+                  /* @__PURE__ */ jsxs("div", { className: "space-y-3", children: [
+                    /* @__PURE__ */ jsxs(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => setSelectedDifficulty("easy"),
+                        className: `w-full p-3 flex items-center justify-between rounded-2xl border-2 text-left transition-all cursor-pointer ${selectedDifficulty === "easy" ? "border-emerald-500 bg-emerald-50/40" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/50"}`,
+                        children: [
+                          /* @__PURE__ */ jsxs("div", { className: "flex items-start gap-3", children: [
+                            /* @__PURE__ */ jsx("span", { className: "text-2xl mt-0.5", children: "\u{1F476}" }),
+                            /* @__PURE__ */ jsxs("div", { children: [
+                              /* @__PURE__ */ jsx("h3", { className: "font-bold text-slate-800 text-xs sm:text-sm", children: "\uC26C\uC6C0 (Easy)" }),
+                              /* @__PURE__ */ jsx("p", { className: "text-[11px] text-slate-500 mt-0.5", children: "\uC4F0\uB808\uAE30 \uC18D\uB3C4 80% \u2022 \uCD08\uBCF4\uC790 \uCD94\uCC9C" })
+                            ] })
+                          ] }),
+                          selectedDifficulty === "easy" && /* @__PURE__ */ jsx("div", { className: "w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white", children: /* @__PURE__ */ jsx(Check, { size: 12, strokeWidth: 3 }) })
+                        ]
+                      }
+                    ),
+                    /* @__PURE__ */ jsxs(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => setSelectedDifficulty("medium"),
+                        className: `w-full p-3 flex items-center justify-between rounded-2xl border-2 text-left transition-all cursor-pointer ${selectedDifficulty === "medium" ? "border-emerald-500 bg-emerald-50/40" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/50"}`,
+                        children: [
+                          /* @__PURE__ */ jsxs("div", { className: "flex items-start gap-3", children: [
+                            /* @__PURE__ */ jsx("span", { className: "text-2xl mt-0.5", children: "\u{1F680}" }),
+                            /* @__PURE__ */ jsxs("div", { children: [
+                              /* @__PURE__ */ jsx("h3", { className: "font-bold text-slate-800 text-xs sm:text-sm", children: "\uBCF4\uD1B5 (Normal)" }),
+                              /* @__PURE__ */ jsx("p", { className: "text-[11px] text-slate-500 mt-0.5", children: "\uC4F0\uB808\uAE30 \uC18D\uB3C4 100% \u2022 \uAE30\uBCF8 \uBC38\uB7F0\uC2A4" })
+                            ] })
+                          ] }),
+                          selectedDifficulty === "medium" && /* @__PURE__ */ jsx("div", { className: "w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white", children: /* @__PURE__ */ jsx(Check, { size: 12, strokeWidth: 3 }) })
+                        ]
+                      }
+                    ),
+                    /* @__PURE__ */ jsxs(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => setSelectedDifficulty("hard"),
+                        className: `w-full p-3 flex items-center justify-between rounded-2xl border-2 text-left transition-all cursor-pointer ${selectedDifficulty === "hard" ? "border-emerald-500 bg-emerald-50/40" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/50"}`,
+                        children: [
+                          /* @__PURE__ */ jsxs("div", { className: "flex items-start gap-3", children: [
+                            /* @__PURE__ */ jsx("span", { className: "text-2xl mt-0.5", children: "\u26A1" }),
+                            /* @__PURE__ */ jsxs("div", { children: [
+                              /* @__PURE__ */ jsx("h3", { className: "font-bold text-slate-800 text-xs sm:text-sm", children: "\uC5B4\uB824\uC6C0 (Hard)" }),
+                              /* @__PURE__ */ jsx("p", { className: "text-[11px] text-slate-500 mt-0.5", children: "\uC4F0\uB808\uAE30 \uC18D\uB3C4 140% \u2022 \uD55C\uACC4 \uB3CC\uD30C!" })
+                            ] })
+                          ] }),
+                          selectedDifficulty === "hard" && /* @__PURE__ */ jsx("div", { className: "w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white", children: /* @__PURE__ */ jsx(Check, { size: 12, strokeWidth: 3 }) })
+                        ]
+                      }
+                    ),
+                    /* @__PURE__ */ jsxs(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => setSelectedDifficulty("very_hard"),
+                        className: `w-full p-3 flex items-center justify-between rounded-2xl border-2 text-left transition-all cursor-pointer ${selectedDifficulty === "very_hard" ? "border-emerald-500 bg-emerald-50/40" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/50"}`,
+                        children: [
+                          /* @__PURE__ */ jsxs("div", { className: "flex items-start gap-3", children: [
+                            /* @__PURE__ */ jsx("span", { className: "text-2xl mt-0.5", children: "\u{1F480}" }),
+                            /* @__PURE__ */ jsxs("div", { children: [
+                              /* @__PURE__ */ jsx("h3", { className: "font-bold text-slate-800 text-xs sm:text-sm", children: "\uB9E4\uC6B0 \uC5B4\uB824\uC6C0 (Very Hard)" }),
+                              /* @__PURE__ */ jsx("p", { className: "text-[11px] text-slate-500 mt-0.5", children: "\uC4F0\uB808\uAE30 \uC18D\uB3C4 200% \u2022 \uCD08\uACE0\uC218 \uC804\uC6A9!" })
+                            ] })
+                          ] }),
+                          selectedDifficulty === "very_hard" && /* @__PURE__ */ jsx("div", { className: "w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white", children: /* @__PURE__ */ jsx(Check, { size: 12, strokeWidth: 3 }) })
+                        ]
+                      }
+                    )
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "flex gap-3", children: [
+                  /* @__PURE__ */ jsxs(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: () => setStep("nickname"),
+                      className: "flex items-center justify-center gap-1.5 px-4 py-4 border-2 border-slate-200 rounded-2xl text-slate-600 hover:bg-slate-50 font-bold text-sm transition-all cursor-pointer active:scale-95",
+                      children: [
+                        /* @__PURE__ */ jsx(ChevronLeft, { size: 16 }),
+                        "\uC774\uC804"
+                      ]
+                    }
+                  ),
+                  /* @__PURE__ */ jsxs(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: handleStart,
+                      className: "flex-1 py-4 text-base font-bold text-white transition-all bg-emerald-500 rounded-2xl hover:bg-emerald-600 active:scale-98 shadow-lg shadow-emerald-200 flex items-center justify-center gap-2 cursor-pointer",
+                      children: [
+                        "\uAC8C\uC784 \uC2DC\uC791\uD558\uAE30",
+                        /* @__PURE__ */ jsx(Gamepad2, { size: 16 })
+                      ]
+                    }
+                  )
+                ] })
+              ]
+            },
+            "difficulty-step"
+          ) }) })
+        ]
+      }
+    ),
+    /* @__PURE__ */ jsx(AnimatePresence, { children: showLeaderboard && /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm", children: /* @__PURE__ */ jsxs(
+      motion.div,
+      {
+        initial: { scale: 0.95, y: 15, opacity: 0 },
+        animate: { scale: 1, y: 0, opacity: 1 },
+        exit: { scale: 0.95, y: 15, opacity: 0 },
+        className: "w-full max-w-lg bg-slate-800 text-white rounded-3xl shadow-2xl overflow-hidden relative border border-slate-700/50 flex flex-col max-h-[85vh]",
+        onClick: (e) => e.stopPropagation(),
+        children: [
+          /* @__PURE__ */ jsxs("div", { className: "p-4 border-b border-slate-700/80 flex justify-between items-center bg-slate-800/90 backdrop-blur flex-shrink-0", children: [
+            /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+              /* @__PURE__ */ jsx(Trophy, { className: "text-amber-400 w-5 h-5 animate-pulse" }),
+              /* @__PURE__ */ jsx("h3", { className: "font-extrabold text-sm text-slate-100", children: "\uC2E4\uC2DC\uAC04 \uAE00\uB85C\uBC8C \uB7AD\uD0B9" })
+            ] }),
+            /* @__PURE__ */ jsxs(
+              "button",
+              {
+                onClick: () => setShowLeaderboard(false),
+                className: "p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-all cursor-pointer flex items-center gap-1.5 text-xs font-bold",
+                children: [
+                  /* @__PURE__ */ jsx(X, { size: 14 }),
+                  "\uB2EB\uAE30"
+                ]
+              }
+            )
+          ] }),
+          /* @__PURE__ */ jsx("div", { className: "p-4 overflow-y-auto flex-1 bg-slate-800 custom-scrollbar", children: /* @__PURE__ */ jsx(Leaderboard, { refreshTrigger: 0 }) })
+        ]
+      }
+    ) }) })
+  ] });
+}
+function GameBelt({
+  activeItems,
+  selectedId,
+  onSelectItem,
+  onDragStart,
+  onDragUpdate,
+  onDragEnd
+}) {
+  const containerRef = useRef(null);
+  const getBinUnderPointer = (event, clientX, clientY) => {
+    let x = clientX;
+    let y = clientY;
+    if (event) {
+      if (event.touches && event.touches.length > 0) {
+        x = event.touches[0].clientX;
+        y = event.touches[0].clientY;
+      } else if (event.changedTouches && event.changedTouches.length > 0) {
+        x = event.changedTouches[0].clientX;
+        y = event.changedTouches[0].clientY;
+      } else if (event.clientX !== void 0) {
+        x = event.clientX;
+        y = event.clientY;
+      }
+    }
+    if (x === void 0 || y === void 0) return null;
+    const elements = document.elementsFromPoint(x, y);
+    for (const el of elements) {
+      const category = el.getAttribute("data-category");
+      if (category) {
+        return category;
+      }
+    }
+    return null;
+  };
+  return /* @__PURE__ */ jsxs(
+    "div",
+    {
+      ref: containerRef,
+      className: "relative w-full h-44 bg-slate-800 border-y-4 border-slate-700 rounded-3xl overflow-hidden shadow-inner flex flex-col justify-between",
+      children: [
+        /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 flex flex-col justify-between pointer-events-none opacity-20", children: [
+          /* @__PURE__ */ jsx("div", { className: "h-2 bg-gradient-to-b from-slate-900 to-transparent" }),
+          /* @__PURE__ */ jsx("div", { className: "absolute inset-x-0 top-1/2 -translate-y-1/2 h-16 flex items-center justify-around overflow-hidden", children: Array.from({ length: 15 }).map((_, i) => /* @__PURE__ */ jsx(
+            motion.div,
+            {
+              animate: { x: [0, 60] },
+              transition: {
+                repeat: Infinity,
+                duration: 2,
+                ease: "linear"
+              },
+              className: "w-1.5 h-16 bg-slate-600 rounded-full"
+            },
+            i
+          )) }),
+          /* @__PURE__ */ jsx("div", { className: "h-2 bg-gradient-to-t from-slate-900 to-transparent" })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: "relative px-6 py-2 bg-slate-900/60 border-b border-slate-800 flex items-center justify-between text-xs font-bold text-slate-400 pointer-events-none", children: [
+          /* @__PURE__ */ jsx("span", { className: "flex items-center gap-1.5", children: /* @__PURE__ */ jsx(MoveHorizontal, { size: 14, className: "animate-pulse text-emerald-400" }) }),
+          /* @__PURE__ */ jsx("span", { className: "text-[10px] bg-slate-800 px-2 py-0.5 rounded-full text-slate-300", children: "\uB4DC\uB798\uADF8\uD558\uAC70\uB098 \uD074\uB9AD\uD558\uC5EC \uC218\uAC70\uD568\uC5D0 \uBD84\uB9AC\uBC30\uCD9C \uD558\uC138\uC694" })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: "relative flex-1 w-full overflow-hidden", children: [
+          activeItems.map((item, index) => {
+            const isSelected = selectedId === item.activeId;
+            const rotation = index % 2 === 0 ? 2 : -2;
+            return /* @__PURE__ */ jsx(
+              motion.div,
+              {
+                style: {
+                  left: `${item.progress}%`,
+                  position: "absolute",
+                  top: "50%",
+                  y: "-50%",
+                  transition: "left 0.05s linear"
+                },
+                className: "z-10",
+                children: /* @__PURE__ */ jsxs(
+                  motion.div,
+                  {
+                    drag: true,
+                    dragSnapToOrigin: true,
+                    dragElastic: 0.4,
+                    onDragStart: () => {
+                      onSelectItem(item.activeId);
+                      onDragStart(item.activeId);
+                    },
+                    onDrag: (event, info) => {
+                      const bin = getBinUnderPointer(event, info.point.x, info.point.y);
+                      onDragUpdate(bin);
+                    },
+                    onDragEnd: (event, info) => {
+                      const bin = getBinUnderPointer(event, info.point.x, info.point.y);
+                      onDragEnd(item.activeId, bin);
+                    },
+                    whileDrag: {
+                      scale: 1.15,
+                      rotate: rotation * 2,
+                      boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.25)"
+                    },
+                    onClick: () => onSelectItem(item.activeId),
+                    className: `
+                  relative w-32 h-32 flex flex-col items-center justify-center p-3 rounded-2xl border-2 transition-all cursor-grab active:cursor-grabbing touch-none
+                  bg-white text-slate-800 shadow-xl select-none
+                  ${isSelected ? "border-emerald-400 ring-4 ring-emerald-200 scale-105" : "border-slate-100"}
+                  hover:border-slate-300
+                `,
+                    style: {
+                      rotate: isSelected ? 0 : rotation
+                    },
+                    id: `trash-item-${item.activeId}`,
+                    children: [
+                      /* @__PURE__ */ jsx("span", { className: `
+                  absolute top-2 right-2 text-[9px] px-1.5 py-0.5 rounded-md font-bold
+                  ${item.difficulty === "\uC26C\uC6C0" ? "bg-emerald-50 text-emerald-600" : ""}
+                  ${item.difficulty === "\uBCF4\uD1B5" ? "bg-amber-50 text-amber-600" : ""}
+                  ${item.difficulty === "\uC5B4\uB824\uC6C0" ? "bg-rose-50 text-rose-600" : ""}
+                `, children: item.difficulty }),
+                      /* @__PURE__ */ jsx("div", { className: "text-4xl sm:text-5xl mb-2 filter drop-shadow-sm select-none pointer-events-none", children: item.emoji }),
+                      /* @__PURE__ */ jsx("div", { className: "text-sm font-black text-center text-slate-800 tracking-tight leading-tight w-full truncate px-1", children: item.name }),
+                      isSelected && /* @__PURE__ */ jsx("div", { className: "absolute -bottom-1.5 -right-1 bg-emerald-500 text-white rounded-full p-0.5 shadow-xs", children: /* @__PURE__ */ jsx(Sparkles, { size: 10 }) })
+                    ]
+                  }
+                )
+              },
+              item.activeId
+            );
+          }),
+          activeItems.length === 0 && /* @__PURE__ */ jsx("div", { className: "absolute inset-0 flex items-center justify-center text-slate-400 font-medium text-sm", children: "\uC4F0\uB808\uAE30\uAC00 \uC2A4\uD3F0\uB418\uB294 \uC911..." })
+        ] }),
+        /* @__PURE__ */ jsx("div", { className: "h-1.5 w-full bg-slate-900 relative", children: /* @__PURE__ */ jsx("div", { className: "absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-rose-500/30 to-transparent flex items-center justify-end pr-2 text-[8px] text-rose-400 font-bold tracking-wider pointer-events-none", children: "\uB099\uD558 \uC704\uD5D8!" }) })
+      ]
+    }
+  );
+}
+var BINS = [
+  {
+    category: "\uC77C\uBC18 \uC4F0\uB808\uAE30" /* GENERAL */,
+    color: "border-b-4 border-slate-400 text-slate-700",
+    bgColor: "bg-white",
+    hoverBg: "hover:bg-slate-50",
+    darkBg: "bg-slate-900 border-b-4 border-slate-700 text-slate-300",
+    icon: Trash2,
+    examples: "\uAE68\uC9C4 \uC720\uB9AC, \uCE6B\uC194, \uD734\uC9C0, \uC591\uD30C \uAECD\uC9C8, \uC601\uC218\uC99D, \uB2EC\uAC40 \uAECD\uB370\uAE30",
+    emoji: "\u{1F5D1}\uFE0F"
+  },
+  {
+    category: "\uC74C\uC2DD\uBB3C \uC4F0\uB808\uAE30" /* FOOD */,
+    color: "border-b-4 border-amber-400 text-amber-800",
+    bgColor: "bg-white",
+    hoverBg: "hover:bg-amber-50",
+    darkBg: "bg-amber-950/20 border-b-4 border-amber-900 text-amber-200",
+    icon: Apple,
+    examples: "\uBC14\uB098\uB098 \uAECD\uC9C8, \uC218\uBC15 \uAECD\uC9C8 (\uB3D9\uBB3C \uC0AC\uB8CC \uAC00\uB2A5)",
+    emoji: "\u{1F34F}"
+  },
+  {
+    category: "\uBE44\uB2D0\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* VINYL */,
+    color: "border-b-4 border-slate-300 text-violet-700",
+    bgColor: "bg-white",
+    hoverBg: "hover:bg-slate-50",
+    darkBg: "bg-violet-950/20 border-b-4 border-violet-900 text-violet-200",
+    icon: Layers,
+    examples: "\uACFC\uC790 \uBD09\uC9C0, \uBF41\uBF41\uC774, \uAE68\uB057\uD55C \uBE44\uB2D0\uD329",
+    emoji: "\u{1F6CD}\uFE0F"
+  },
+  {
+    category: "\uD50C\uB77C\uC2A4\uD2F1\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* PLASTIC */,
+    color: "border-b-4 border-blue-400 text-blue-700",
+    bgColor: "bg-white",
+    hoverBg: "hover:bg-blue-50",
+    darkBg: "bg-blue-950/20 border-b-4 border-blue-900 text-blue-200",
+    icon: GlassWater,
+    examples: "\uAE68\uB057\uD55C \uC0DD\uC218\uBCD1, \uC77C\uD68C\uC6A9 \uCEF5, \uC0F4\uD478 \uC6A9\uAE30(\uBCF8\uCCB4)",
+    emoji: "\u{1F9F4}"
+  },
+  {
+    category: "\uCE94\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* CAN */,
+    color: "border-b-4 border-orange-400 text-orange-700",
+    bgColor: "bg-white",
+    hoverBg: "hover:bg-orange-50",
+    darkBg: "bg-cyan-950/20 border-b-4 border-cyan-900 text-cyan-200",
+    icon: Package,
+    examples: "\uD1B5\uC870\uB9BC\uCE94, \uC74C\uB8CC\uC218\uCE94, \uBD80\uD0C4\uAC00\uC2A4 \uC6A9\uAE30(\uAD6C\uBA4D)",
+    emoji: "\u{1F96B}"
+  },
+  {
+    category: "\uC885\uC774\uB958 \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* PAPER */,
+    color: "border-b-4 border-sky-400 text-amber-950",
+    bgColor: "bg-white",
+    hoverBg: "hover:bg-sky-50",
+    darkBg: "bg-yellow-950/20 border-b-4 border-yellow-900 text-yellow-200",
+    icon: FileText,
+    examples: "\uC804\uB2E8\uC9C0, \uC0C1\uC790, \uC2E0\uBB38, \uC885\uC774\uCEF5(\uD589\uAD70 \uAC83)",
+    emoji: "\u{1F4E6}"
+  },
+  {
+    category: "\uC720\uB9AC \uC7AC\uD65C\uC6A9 \uC4F0\uB808\uAE30" /* GLASS */,
+    color: "border-b-4 border-emerald-400 text-emerald-800",
+    bgColor: "bg-white",
+    hoverBg: "hover:bg-emerald-50",
+    darkBg: "bg-emerald-950/20 border-b-4 border-emerald-900 text-emerald-200",
+    icon: Wine,
+    examples: "\uC74C\uB8CC\uC218\uBCD1, \uB9E5\uC8FC\uBCD1, \uC18C\uC8FC\uBCD1 (\uC548 \uAE68\uC9C4 \uAC83)",
+    emoji: "\u{1F37E}"
+  },
+  {
+    category: "\uAE30\uD0C0 \uC4F0\uB808\uAE30" /* OTHER */,
+    color: "border-b-4 border-rose-400 text-rose-700",
+    bgColor: "bg-white",
+    hoverBg: "hover:bg-rose-50",
+    darkBg: "bg-rose-950/20 border-b-4 border-rose-900 text-rose-200",
+    icon: BatteryCharging,
+    examples: "\uAC74\uC804\uC9C0, \uD5CC\uC637, \uD3D0\uC758\uC57D\uD488, \uD615\uAD11\uB4F1(\uC804\uC6A9\uC218\uAC70)",
+    emoji: "\u{1F50B}"
+  },
+  {
+    category: "\uB300\uD615 \uD3D0\uAE30\uBB3C" /* LARGE */,
+    color: "border-b-4 border-indigo-600 text-indigo-800",
+    bgColor: "bg-white",
+    hoverBg: "hover:bg-indigo-50",
+    darkBg: "bg-indigo-950/20 border-b-4 border-indigo-900 text-indigo-200",
+    icon: Truck,
+    examples: "\uD3D0\uC790\uC804\uAC70, \uC18C\uD30C, \uCE68\uB300 \uB9E4\uD2B8\uB9AC\uC2A4, \uB300\uD615 \uAC00\uAD6C",
+    emoji: "\u{1F6CB}\uFE0F"
+  }
+];
+function BinGrid({
+  onBinSelect,
+  activeSelectedId,
+  hoveredBin
+}) {
+  return /* @__PURE__ */ jsxs("div", { className: "space-y-3", children: [
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between", children: [
+      /* @__PURE__ */ jsx("h3", { className: "text-sm font-bold text-slate-600 dark:text-slate-400", children: "\u{1F4E5} \uBD84\uB9AC\uC218\uAC70\uD568 \uC601\uC5ED" }),
+      activeSelectedId && /* @__PURE__ */ jsx("span", { className: "text-xs font-semibold px-2.5 py-1 text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-950/50 rounded-full animate-pulse", children: "\u{1F446} \uC4F0\uB808\uAE30 \uC120\uD0DD\uB428 - \uC544\uB798\uC758 \uC54C\uB9DE\uC740 \uC218\uAC70\uD568\uC744 \uD074\uB9AD\uD558\uC5EC \uBD84\uB9AC\uC218\uAC70 \uD558\uC138\uC694!" })
+    ] }),
+    /* @__PURE__ */ jsx("div", { className: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3", children: BINS.map((bin) => {
+      const Icon = bin.icon;
+      const isHovered = hoveredBin === bin.category;
+      return /* @__PURE__ */ jsxs(
+        motion.div,
+        {
+          "data-category": bin.category,
+          onClick: () => onBinSelect && onBinSelect(bin.category),
+          whileHover: { scale: 1.03, y: -3 },
+          whileTap: { scale: 0.97 },
+          className: `
+                relative p-4 rounded-2xl border transition-all cursor-pointer flex flex-col items-center justify-center text-center gap-2 overflow-hidden shadow-xs min-h-[130px]
+                ${bin.bgColor} ${bin.color} ${bin.hoverBg}
+                ${isHovered ? "ring-4 ring-emerald-500 scale-103 shadow-md border-transparent" : ""}
+                ${activeSelectedId ? "hover:ring-2 hover:ring-emerald-300" : ""}
+              `,
+          id: `bin-${bin.category.replace(/\s+/g, "-")}`,
+          children: [
+            /* @__PURE__ */ jsx("div", { className: "absolute right-2 bottom-1 opacity-5 pointer-events-none", children: /* @__PURE__ */ jsx(Icon, { size: 50 }) }),
+            /* @__PURE__ */ jsx("span", { className: "text-3.5xl filter drop-shadow-xs select-none pointer-events-none", children: bin.emoji }),
+            /* @__PURE__ */ jsx("div", { className: "z-10", children: /* @__PURE__ */ jsx("h4", { className: "font-extrabold text-xs sm:text-sm leading-tight text-slate-800 tracking-tight", children: bin.category.includes("\uC7AC\uD65C\uC6A9") ? /* @__PURE__ */ jsxs(Fragment, { children: [
+              bin.category.split("\uC7AC\uD65C\uC6A9")[0],
+              "\uC7AC\uD65C\uC6A9",
+              /* @__PURE__ */ jsx("br", {}),
+              bin.category.split("\uC7AC\uD65C\uC6A9")[1]?.trim()
+            ] }) : bin.category }) }),
+            /* @__PURE__ */ jsx("div", { className: "text-[9px] text-slate-400 font-medium line-clamp-1 opacity-80 mt-0.5", children: bin.category === "\uAE30\uD0C0 \uC4F0\uB808\uAE30" /* OTHER */ ? "\uAC74\uC804\uC9C0, \uD615\uAD11\uB4F1, \uD5CC\uC637 \uB4F1" : bin.category === "\uB300\uD615 \uD3D0\uAE30\uBB3C" /* LARGE */ ? "\uD3D0\uC790\uC804\uAC70, \uC18C\uD30C, \uC804\uC790\uC81C\uD488 \uB4F1" : `${bin.examples.split(",")[0]} \uB4F1` })
+          ]
+        },
+        bin.category
+      );
+    }) })
+  ] });
+}
+function HistoryLog({ logs }) {
+  return /* @__PURE__ */ jsxs("div", { className: "bg-white/70 backdrop-blur-md rounded-2xl border border-white p-4 flex flex-col h-[320px] shadow-xs", children: [
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-3 border-b border-slate-100 pb-2 flex-shrink-0", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1.5", children: [
+        /* @__PURE__ */ jsx(BookOpen, { size: 15, className: "text-emerald-500" }),
+        /* @__PURE__ */ jsx("h3", { className: "font-extrabold text-xs text-slate-800 tracking-tight uppercase", children: "\uC2E4\uC2DC\uAC04 \uBC30\uCD9C \uD53C\uB4DC\uBC31" })
+      ] }),
+      /* @__PURE__ */ jsxs("span", { className: "text-[10px] text-slate-400 font-mono", children: [
+        "\uCD1D ",
+        logs.length,
+        "\uAC74"
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto pr-0.5 space-y-2.5 custom-scrollbar", children: [
+      /* @__PURE__ */ jsx(AnimatePresence, { initial: false, children: logs.map((log) => {
+        const isMiss = log.scoreChange === -20;
+        return /* @__PURE__ */ jsxs(
+          motion.div,
+          {
+            initial: { opacity: 0, y: -10, scale: 0.95 },
+            animate: { opacity: 1, y: 0, scale: 1 },
+            exit: { opacity: 0 },
+            transition: { duration: 0.2 },
+            className: `
+                  p-2.5 rounded-xl border flex flex-col gap-1.5 transition-all shadow-xs
+                  ${log.isCorrect ? "bg-emerald-50 border-emerald-100" : isMiss ? "bg-slate-50 border-slate-200" : "bg-rose-50 border-rose-100"}
+                `,
+            children: [
+              /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between gap-2", children: [
+                /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+                  /* @__PURE__ */ jsx("span", { className: "text-2xl filter drop-shadow-xs", children: log.emoji }),
+                  /* @__PURE__ */ jsxs("div", { className: "min-w-0", children: [
+                    /* @__PURE__ */ jsx("span", { className: `font-extrabold text-xs block truncate ${log.isCorrect ? "text-emerald-800" : isMiss ? "text-slate-800" : "text-rose-800"}`, children: log.itemName }),
+                    /* @__PURE__ */ jsx("span", { className: `text-[10px] block truncate ${log.isCorrect ? "text-emerald-600" : isMiss ? "text-slate-500" : "text-rose-600"}`, children: isMiss ? "\uB099\uD558 \uC624\uB2F5" : `${log.selectedCategory} -> ${log.isCorrect ? "\uC131\uACF5" : "\uC2E4\uD328"}` })
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsx("div", { className: "flex items-center gap-1.5 flex-shrink-0", children: /* @__PURE__ */ jsx("span", { className: `
+                      text-[11px] font-black tracking-tight px-2 py-0.5 rounded-full
+                      ${log.isCorrect ? "text-emerald-700 bg-emerald-100/50" : isMiss ? "text-slate-700 bg-slate-200" : "text-rose-700 bg-rose-100/50"}
+                    `, children: log.scoreChange > 0 ? `+${log.scoreChange}` : log.scoreChange }) })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "text-[10px] leading-snug text-slate-600 bg-white/80 p-2 rounded-lg border border-slate-100 font-medium", children: [
+                "\u{1F4A1} ",
+                /* @__PURE__ */ jsx("span", { className: "font-bold text-slate-800", children: "\uD301:" }),
+                " ",
+                log.tip
+              ] })
+            ]
+          },
+          log.id
+        );
+      }) }),
+      logs.length === 0 && /* @__PURE__ */ jsxs("div", { className: "h-full flex flex-col items-center justify-center text-center p-4 text-slate-400 space-y-1", children: [
+        /* @__PURE__ */ jsx(BookOpen, { size: 24, className: "opacity-30 mb-2 animate-bounce text-slate-400" }),
+        /* @__PURE__ */ jsx("p", { className: "font-bold text-xs text-slate-500", children: "\uBC30\uCD9C \uD788\uC2A4\uD1A0\uB9AC\uAC00 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4" }),
+        /* @__PURE__ */ jsx("p", { className: "text-[9px] leading-relaxed text-slate-400", children: "\uBCA8\uD2B8 \uC704\uC758 \uC4F0\uB808\uAE30\uB97C \uB04C\uC5B4 \uC54C\uB9DE\uC740 \uC218\uAC70\uD568\uC5D0 \uC62C\uBC14\uB974\uAC8C \uBD84\uB9AC\uBC30\uCD9C \uD558\uC138\uC694!" })
+      ] })
+    ] })
+  ] });
+}
+function Leaderboard({ refreshTrigger }) {
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [firebaseActive, setFirebaseActive] = useState(false);
+  const [refreshCounter, setRefreshCounter] = useState(0);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirmStep, setConfirmStep] = useState(false);
+  const [resetError, setResetError] = useState("");
+  const [resetSuccess, setResetSuccess] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const handleRefresh = () => {
+    setRefreshCounter((prev) => prev + 1);
+  };
+  const handleOpenReset = () => {
+    setPassword("");
+    setResetError("");
+    setResetSuccess(false);
+    setConfirmStep(false);
+    setResetting(false);
+    setShowResetModal(true);
+  };
+  const handlePasswordSubmit = (e) => {
+    e.preventDefault();
+    if (password === "1234") {
+      setResetError("");
+      setConfirmStep(true);
+    } else {
+      setResetError("\uBE44\uBC00\uBC88\uD638\uAC00 \uC77C\uCE58\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. (\uAE30\uBCF8: 1234)");
+    }
+  };
+  const handleExecuteReset = async () => {
+    setResetting(true);
+    setResetError("");
+    try {
+      await clearLeaderboard();
+      setResetSuccess(true);
+      setTimeout(() => {
+        setShowResetModal(false);
+        handleRefresh();
+      }, 1500);
+    } catch (e) {
+      setResetError("\uB7AD\uD0B9 \uCD08\uAE30\uD654 \uC911 \uC5D0\uB7EC\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
+    } finally {
+      setResetting(false);
+    }
+  };
+  useEffect(() => {
+    setLoading(true);
+    const unsubscribe = subscribeToLeaderboard((data) => {
+      setEntries(data);
+      setFirebaseActive(isUsingFirebase());
+      setLoading(false);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [refreshTrigger, refreshCounter]);
+  return /* @__PURE__ */ jsxs("div", { className: "bg-slate-800 text-white rounded-2xl p-5 flex flex-col h-full min-h-[400px] shadow-lg shadow-slate-300/30 border-0 relative", children: [
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between border-b border-slate-700 pb-4 mb-4 flex-shrink-0", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+        /* @__PURE__ */ jsx(Trophy, { className: "text-amber-400 animate-pulse", size: 18 }),
+        /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsx("h3", { className: "font-extrabold text-xs uppercase tracking-wider text-slate-100", children: "\uC2E4\uC2DC\uAC04 \uAE00\uB85C\uBC8C \uB7AD\uD0B9" }),
+          /* @__PURE__ */ jsx("p", { className: "text-[10px] text-slate-400", children: "\uCD5C\uACE0 \uC810\uC218\uB97C \uAC31\uC2E0\uD574 \uBCF4\uC138\uC694!" })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1.5", children: [
+        /* @__PURE__ */ jsxs("div", { className: `flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full ${firebaseActive ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-700 text-slate-400"}`, children: [
+          /* @__PURE__ */ jsx(Globe, { size: 10, className: firebaseActive ? "animate-spin" : "" }),
+          /* @__PURE__ */ jsx("span", { children: firebaseActive ? "\uC2E4\uC2DC\uAC04" : "\uB85C\uCEEC" })
+        ] }),
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            onClick: handleRefresh,
+            type: "button",
+            className: "p-1 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-all active:scale-95 cursor-pointer",
+            title: "\uC0C8\uB85C\uACE0\uCE68",
+            children: /* @__PURE__ */ jsx(RefreshCw, { size: 12, className: loading ? "animate-spin" : "" })
+          }
+        ),
+        /* @__PURE__ */ jsxs(
+          "button",
+          {
+            onClick: handleOpenReset,
+            type: "button",
+            className: "p-1 rounded-lg hover:bg-rose-950/40 text-rose-400/80 hover:text-rose-400 transition-all active:scale-95 flex items-center gap-0.5 ml-0.5 border border-rose-500/20 cursor-pointer",
+            title: "\uAD50\uC0AC\uC6A9 \uB7AD\uD0B9 \uCD08\uAE30\uD654 (\uBE44\uBC00\uBC88\uD638: 1234)",
+            children: [
+              /* @__PURE__ */ jsx(Trash2, { size: 11 }),
+              /* @__PURE__ */ jsx("span", { className: "text-[9px] font-semibold", children: "\uCD08\uAE30\uD654" })
+            ]
+          }
+        )
+      ] })
+    ] }),
+    /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto pr-1 space-y-2 custom-scrollbar", children: loading ? /* @__PURE__ */ jsx("div", { className: "h-full flex items-center justify-center py-12", children: /* @__PURE__ */ jsx(RefreshCw, { className: "animate-spin text-emerald-400 w-6 h-6" }) }) : entries.length > 0 ? /* @__PURE__ */ jsxs("div", { className: "space-y-2", children: [
+      /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-12 px-2 py-1 text-[9px] font-bold text-slate-400 uppercase tracking-wider", children: [
+        /* @__PURE__ */ jsx("span", { className: "col-span-2 text-center", children: "\uC21C\uC704" }),
+        /* @__PURE__ */ jsx("span", { className: "col-span-4", children: "\uD50C\uB808\uC774\uC5B4" }),
+        /* @__PURE__ */ jsx("span", { className: "col-span-2 text-right", children: "\uC810\uC218" }),
+        /* @__PURE__ */ jsx("span", { className: "col-span-2 text-right", children: "\uBC30\uCD9C" }),
+        /* @__PURE__ */ jsx("span", { className: "col-span-2 text-right", children: "\uC815\uD655\uB3C4" })
+      ] }),
+      entries.map((entry, index) => {
+        const rank = index + 1;
+        const isTop3 = rank <= 3;
+        return /* @__PURE__ */ jsxs(
+          motion.div,
+          {
+            initial: { opacity: 0, x: -10 },
+            animate: { opacity: 1, x: 0 },
+            transition: { delay: index * 0.05, duration: 0.2 },
+            className: `
+                    grid grid-cols-12 items-center px-2 py-2.5 rounded-xl border transition-all text-[11px] font-semibold
+                    ${isTop3 ? rank === 1 ? "bg-slate-700/50 border-amber-500/50 text-slate-100" : rank === 2 ? "bg-slate-700/40 border-slate-600 text-slate-200" : "bg-slate-700/30 border-amber-700/40 text-slate-200" : "bg-slate-800/50 border-slate-700/40 text-slate-300 hover:bg-slate-700/30"}
+                  `,
+            children: [
+              /* @__PURE__ */ jsx("span", { className: "col-span-2 text-center flex items-center justify-center font-mono", children: rank === 1 ? /* @__PURE__ */ jsx("span", { className: "text-amber-400 font-bold", children: "1" }) : rank === 2 ? /* @__PURE__ */ jsx("span", { className: "text-slate-300 font-bold", children: "2" }) : rank === 3 ? /* @__PURE__ */ jsx("span", { className: "text-amber-700 font-bold", children: "3" }) : /* @__PURE__ */ jsx("span", { className: "text-slate-500", children: rank }) }),
+              /* @__PURE__ */ jsx("span", { className: "col-span-4 truncate font-extrabold pr-1 text-slate-100", children: entry.name }),
+              /* @__PURE__ */ jsx("span", { className: "col-span-2 text-right font-black text-emerald-400", children: entry.score }),
+              /* @__PURE__ */ jsx("span", { className: "col-span-2 text-right font-mono text-slate-400", children: entry.attempts }),
+              /* @__PURE__ */ jsxs("span", { className: "col-span-2 text-right font-mono text-slate-400", children: [
+                entry.accuracy,
+                "%"
+              ] })
+            ]
+          },
+          entry.id || `${entry.name}-${index}`
+        );
+      })
+    ] }) : /* @__PURE__ */ jsxs("div", { className: "h-full flex flex-col items-center justify-center py-12 text-center text-slate-500", children: [
+      /* @__PURE__ */ jsx(Trophy, { size: 28, className: "opacity-20 mb-2" }),
+      /* @__PURE__ */ jsx("p", { className: "font-bold text-xs text-slate-400", children: "\uB7AD\uD0B9 \uAE30\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4" }),
+      /* @__PURE__ */ jsx("p", { className: "text-[9px] text-slate-500", children: "\uAC8C\uC784\uC744 \uC644\uB8CC\uD558\uC5EC \uCD5C\uCD08\uC758 \uC21C\uC704\uB97C \uB4F1\uB85D\uD558\uC138\uC694!" })
+    ] }) }),
+    /* @__PURE__ */ jsxs("div", { className: "mt-3 pt-3 border-t border-slate-700 text-[9px] leading-normal text-slate-400 flex items-start gap-1 flex-shrink-0", children: [
+      /* @__PURE__ */ jsx(HelpCircle, { size: 12, className: "text-slate-500 mt-0.5 flex-shrink-0" }),
+      /* @__PURE__ */ jsxs("p", { children: [
+        /* @__PURE__ */ jsx("strong", { children: "\uC548\uB0B4:" }),
+        " \uC2E4\uC2DC\uAC04 \uD30C\uC774\uC5B4\uBCA0\uC774\uC2A4 \uAE00\uB85C\uBC8C DB\uB85C \uC5F0\uB3D9\uD558\uB824\uBA74 ",
+        /* @__PURE__ */ jsx("code", { children: "/src/firebase.ts" }),
+        " \uC790\uACA9 \uC99D\uBA85\uC744 \uC791\uC131\uD574 \uC8FC\uC2DC\uBA74 \uC2E4\uC2DC\uAC04 \uBAA8\uB4DC\uB85C \uC804\uD658\uB429\uB2C8\uB2E4."
+      ] })
+    ] }),
+    showResetModal && /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 bg-slate-900/95 backdrop-blur-md z-50 flex flex-col items-center justify-center p-6 rounded-2xl", children: [
+      /* @__PURE__ */ jsx(
+        "button",
+        {
+          onClick: () => setShowResetModal(false),
+          className: "absolute top-4 right-4 text-slate-400 hover:text-white transition-colors cursor-pointer",
+          children: /* @__PURE__ */ jsx(X, { size: 18 })
+        }
+      ),
+      !confirmStep ? /* @__PURE__ */ jsxs("form", { onSubmit: handlePasswordSubmit, className: "w-full max-w-xs space-y-4 text-center", children: [
+        /* @__PURE__ */ jsx("div", { className: "inline-flex p-3 bg-rose-500/10 rounded-full text-rose-400 mb-2", children: /* @__PURE__ */ jsx(Lock, { size: 24 }) }),
+        /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsx("h4", { className: "text-sm font-bold text-slate-100", children: "\uAD50\uC0AC \uC804\uC6A9 \uB7AD\uD0B9 \uCD08\uAE30\uD654" }),
+          /* @__PURE__ */ jsx("p", { className: "text-[10px] text-slate-400 mt-1", children: "\uB7AD\uD0B9 \uB370\uC774\uD130\uB97C \uCD08\uAE30\uD654\uD558\uB824\uBA74 \uBE44\uBC00\uBC88\uD638\uB97C \uC785\uB825\uD558\uC138\uC694." })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: "space-y-1 text-left", children: [
+          /* @__PURE__ */ jsx(
+            "input",
+            {
+              type: "password",
+              placeholder: "\uBE44\uBC00\uBC88\uD638 \uC785\uB825 (\uAE30\uBCF8: 1234)",
+              value: password,
+              onChange: (e) => setPassword(e.target.value),
+              className: "w-full bg-slate-950/50 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500/80 text-center font-mono",
+              autoFocus: true
+            }
+          ),
+          resetError && /* @__PURE__ */ jsx("p", { className: "text-[10px] text-rose-400 text-center font-medium mt-1", children: resetError })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: "flex gap-2 pt-2", children: [
+          /* @__PURE__ */ jsx(
+            "button",
+            {
+              type: "button",
+              onClick: () => setShowResetModal(false),
+              className: "flex-1 py-2 bg-slate-700 hover:bg-slate-600 rounded-xl text-[11px] font-bold transition-all cursor-pointer",
+              children: "\uCDE8\uC18C"
+            }
+          ),
+          /* @__PURE__ */ jsx(
+            "button",
+            {
+              type: "submit",
+              className: "flex-1 py-2 bg-rose-500 hover:bg-rose-600 active:scale-95 text-[11px] font-bold rounded-xl transition-all cursor-pointer",
+              children: "\uD655\uC778"
+            }
+          )
+        ] })
+      ] }) : /* @__PURE__ */ jsxs("div", { className: "w-full max-w-xs space-y-4 text-center", children: [
+        /* @__PURE__ */ jsx("div", { className: "inline-flex p-3 bg-amber-500/10 rounded-full text-amber-400 mb-2 animate-bounce", children: /* @__PURE__ */ jsx(Trash2, { size: 24 }) }),
+        /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsx("h4", { className: "text-sm font-bold text-slate-100", children: "\uC815\uB9D0\uB85C \uCD08\uAE30\uD654\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?" }),
+          /* @__PURE__ */ jsx("p", { className: "text-[10px] text-slate-400 mt-1", children: "\uBAA8\uB4E0 \uC2E4\uC2DC\uAC04 \uB7AD\uD0B9 \uB370\uC774\uD130\uAC00 \uC601\uAD6C\uC801\uC73C\uB85C \uC0AD\uC81C\uB418\uBA70, \uC774 \uC791\uC5C5\uC740 \uB418\uB3CC\uB9B4 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4." })
+        ] }),
+        resetError && /* @__PURE__ */ jsx("p", { className: "text-[10px] text-rose-400 font-medium", children: resetError }),
+        resetSuccess ? /* @__PURE__ */ jsx("p", { className: "text-xs font-bold text-emerald-400 bg-emerald-500/10 py-2 rounded-xl", children: "\u2713 \uC815\uC0C1\uC801\uC73C\uB85C \uCD08\uAE30\uD654\uB418\uC5C8\uC2B5\uB2C8\uB2E4!" }) : /* @__PURE__ */ jsxs("div", { className: "flex gap-2 pt-2", children: [
+          /* @__PURE__ */ jsx(
+            "button",
+            {
+              onClick: () => setConfirmStep(false),
+              disabled: resetting,
+              className: "flex-1 py-2 bg-slate-700 hover:bg-slate-600 rounded-xl text-[11px] font-bold transition-all disabled:opacity-50 cursor-pointer",
+              children: "\uC774\uC804\uC73C\uB85C"
+            }
+          ),
+          /* @__PURE__ */ jsx(
+            "button",
+            {
+              onClick: handleExecuteReset,
+              disabled: resetting,
+              className: "flex-1 py-2 bg-rose-500 hover:bg-rose-600 active:scale-95 text-[11px] font-bold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-1 cursor-pointer",
+              children: resetting ? "\uCD08\uAE30\uD654 \uC911..." : "\uCD5C\uC885 \uCD08\uAE30\uD654"
+            }
+          )
+        ] })
+      ] })
+    ] })
+  ] });
+}
+function App() {
+  const [nickname, setNickname] = useState("");
+  const [gameState, setGameState] = useState("lobby");
+  const [timeRemaining, setTimeRemaining] = useState(60);
+  const [score, setScore] = useState(0);
+  const [consecutiveCorrect, setConsecutiveCorrect] = useState(0);
+  const [attempts, setAttempts] = useState(0);
+  const [correctCount, setCorrectCount] = useState(0);
+  const [activeItems, setActiveItems] = useState([]);
+  const updateActiveItems = (itemsOrFn) => {
+    if (typeof itemsOrFn === "function") {
+      setActiveItems((prev) => {
+        const next = itemsOrFn(prev);
+        activeItemsRef.current = next;
+        return next;
+      });
+    } else {
+      activeItemsRef.current = itemsOrFn;
+      setActiveItems(itemsOrFn);
+    }
+  };
+  const [selectedId, setSelectedId] = useState(null);
+  const [hoveredBin, setHoveredBin] = useState(null);
+  const [logs, setLogs] = useState([]);
+  const [isMuted, setIsMuted] = useState(false);
+  const [refreshLeaderboard, setRefreshLeaderboard] = useState(0);
+  const [showComboAnimation, setShowComboAnimation] = useState(false);
+  const [countdown, setCountdown] = useState(5);
+  const [, setDraggedId] = useState(null);
+  const [difficulty, setDifficulty] = useState("medium");
+  const [showLeaderboardModal, setShowLeaderboardModal] = useState(false);
+  const timerIntervalRef = useRef(null);
+  const physicsIntervalRef = useRef(null);
+  const spawnTimeoutRef = useRef(null);
+  const uniqueSpawnIdRef = useRef(0);
+  const audioContextRef = useRef(null);
+  const activeItemsRef = useRef([]);
+  const draggedIdRef = useRef(null);
+  const isEndingRef = useRef(false);
+  const gameSessionIdRef = useRef(null);
+  const scoreRef = useRef(0);
+  const attemptsRef = useRef(0);
+  const correctCountRef = useRef(0);
+  const nicknameRef = useRef("");
+  const updateDraggedId = (id) => {
+    setDraggedId(id);
+    draggedIdRef.current = id;
+  };
+  useEffect(() => {
+    activeItemsRef.current = activeItems;
+  }, [activeItems]);
+  useEffect(() => {
+    scoreRef.current = score;
+  }, [score]);
+  useEffect(() => {
+    attemptsRef.current = attempts;
+  }, [attempts]);
+  useEffect(() => {
+    correctCountRef.current = correctCount;
+  }, [correctCount]);
+  useEffect(() => {
+    nicknameRef.current = nickname;
+  }, [nickname]);
+  const initAudio = () => {
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioContextRef.current && audioContextRef.current.state === "suspended") {
+        audioContextRef.current.resume().catch((err) => console.warn("AudioContext resume failed:", err));
+      }
+    } catch (e) {
+      console.warn("AudioContext initialization failed:", e);
+    }
+  };
+  const playSynthSound = (type) => {
+    if (isMuted) return;
+    try {
+      initAudio();
+      const ctx = audioContextRef.current;
+      if (!ctx) return;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      const now = ctx.currentTime;
+      if (type === "correct") {
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(523.25, now);
+        osc.frequency.setValueAtTime(659.25, now + 0.1);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+        osc.start(now);
+        osc.stop(now + 0.25);
+      } else if (type === "wrong") {
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(180, now);
+        osc.frequency.exponentialRampToValueAtTime(100, now + 0.3);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        osc.start(now);
+        osc.stop(now + 0.3);
+      } else if (type === "miss") {
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.exponentialRampToValueAtTime(60, now + 0.4);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+        osc.start(now);
+        osc.stop(now + 0.4);
+      } else if (type === "combo") {
+        osc.type = "square";
+        osc.frequency.setValueAtTime(523.25, now);
+        osc.frequency.setValueAtTime(659.25, now + 0.08);
+        osc.frequency.setValueAtTime(783.99, now + 0.16);
+        osc.frequency.setValueAtTime(1046.5, now + 0.24);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
+        osc.start(now);
+        osc.stop(now + 0.45);
+      } else if (type === "gameover") {
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(523.25, now);
+        osc.frequency.setValueAtTime(392, now + 0.15);
+        osc.frequency.setValueAtTime(329.63, now + 0.3);
+        osc.frequency.setValueAtTime(261.63, now + 0.45);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
+        osc.start(now);
+        osc.stop(now + 0.7);
+      }
+    } catch (e) {
+      console.warn("\uC624\uB514\uC624 \uC7AC\uC0DD \uC5D0\uB7EC:", e);
+    }
+  };
+  const startGame = (name, diff) => {
+    initAudio();
+    setNickname(name);
+    setDifficulty(diff);
+    setScore(0);
+    setConsecutiveCorrect(0);
+    setAttempts(0);
+    setCorrectCount(0);
+    updateActiveItems([]);
+    setLogs([]);
+    setTimeRemaining(60);
+    setSelectedId(null);
+    setHoveredBin(null);
+    updateDraggedId(null);
+    setCountdown(5);
+    setGameState("countdown");
+    setShowComboAnimation(false);
+    uniqueSpawnIdRef.current = 0;
+    gameSessionIdRef.current = `session_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    isEndingRef.current = false;
+  };
+  useEffect(() => {
+    let interval = null;
+    if (gameState === "countdown") {
+      setCountdown(5);
+      interval = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev <= 1) {
+            if (interval) clearInterval(interval);
+            setGameState("playing");
+            return 0;
+          }
+          try {
+            playSynthSound("correct");
+          } catch (e) {
+          }
+          return prev - 1;
+        });
+      }, 1e3);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [gameState]);
+  const pauseGame = () => {
+    if (gameState === "playing") {
+      setGameState("paused");
+    }
+  };
+  const resumeGame = () => {
+    if (gameState === "paused") {
+      setGameState("playing");
+    }
+  };
+  const restartGame = () => {
+    startGame(nickname, difficulty);
+  };
+  const resetToLobby = () => {
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    if (physicsIntervalRef.current) clearInterval(physicsIntervalRef.current);
+    if (spawnTimeoutRef.current) clearTimeout(spawnTimeoutRef.current);
+    setScore(0);
+    setConsecutiveCorrect(0);
+    setAttempts(0);
+    setCorrectCount(0);
+    updateActiveItems([]);
+    setLogs([]);
+    setTimeRemaining(60);
+    setSelectedId(null);
+    setHoveredBin(null);
+    updateDraggedId(null);
+    setCountdown(5);
+    setGameState("lobby");
+    setShowComboAnimation(false);
+    setShowLeaderboardModal(false);
+    uniqueSpawnIdRef.current = 0;
+  };
+  useEffect(() => {
+    if (gameState === "playing") {
+      timerIntervalRef.current = setInterval(() => {
+        setTimeRemaining((prev) => {
+          if (prev <= 1) {
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1e3);
+    }
+    return () => {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    };
+  }, [gameState]);
+  useEffect(() => {
+    if (gameState === "playing" && timeRemaining === 0) {
+      endGame();
+    }
+  }, [timeRemaining, gameState]);
+  useEffect(() => {
+    if (gameState === "playing") {
+      physicsIntervalRef.current = setInterval(() => {
+        const currentItems = activeItemsRef.current;
+        if (currentItems.length === 0) return;
+        const sorted = [...currentItems].sort((a, b) => b.progress - a.progress);
+        const updated = [];
+        const fellOff = [];
+        let lastMovingProgress = null;
+        for (let i = 0; i < sorted.length; i++) {
+          const item = sorted[i];
+          if (item.activeId === draggedIdRef.current) {
+            updated.push(item);
+            continue;
+          }
+          let nextProgress = item.progress + item.speed / 5;
+          if (lastMovingProgress !== null) {
+            const maxAllowedProgress = lastMovingProgress - 23;
+            if (nextProgress > maxAllowedProgress) {
+              nextProgress = maxAllowedProgress;
+            }
+          }
+          nextProgress = Math.max(0, nextProgress);
+          if (nextProgress >= 100) {
+            fellOff.push(item);
+          } else {
+            updated.push({
+              ...item,
+              progress: nextProgress
+            });
+            lastMovingProgress = nextProgress;
+          }
+        }
+        for (const item of fellOff) {
+          handleItemFallOff(item);
+        }
+        updateActiveItems(updated);
+      }, 20);
+    }
+    return () => {
+      if (physicsIntervalRef.current) clearInterval(physicsIntervalRef.current);
+    };
+  }, [gameState]);
+  useEffect(() => {
+    let timeoutId = null;
+    const spawnLoop = () => {
+      if (gameState !== "playing") return;
+      const currentItems = activeItemsRef.current;
+      if (currentItems.length >= 4) {
+        timeoutId = setTimeout(spawnLoop, 1500);
+        return;
+      }
+      const tooClose = currentItems.some((item) => item.progress < 23);
+      if (tooClose) {
+        timeoutId = setTimeout(spawnLoop, 500);
+        return;
+      }
+      const randomIndex = Math.floor(Math.random() * WASTE_ITEMS.length);
+      const baseItem = WASTE_ITEMS[randomIndex];
+      let speed = 0.6;
+      if (baseItem.difficulty === "\uBCF4\uD1B5") speed = 0.9;
+      if (baseItem.difficulty === "\uC5B4\uB824\uC6C0") speed = 1.2;
+      let difficultyMultiplier = 1.3;
+      if (difficulty === "easy") difficultyMultiplier = 1.04;
+      else if (difficulty === "hard") difficultyMultiplier = 1.82;
+      else if (difficulty === "very_hard") difficultyMultiplier = 2.6;
+      const adjustedSpeed = speed * (0.8 + Math.random() * 0.4) * difficultyMultiplier;
+      uniqueSpawnIdRef.current += 1;
+      const newItem = {
+        ...baseItem,
+        activeId: `${baseItem.id}_${uniqueSpawnIdRef.current}`,
+        progress: 0,
+        speed: adjustedSpeed
+      };
+      updateActiveItems((prev) => [...prev, newItem]);
+      let spawnDelayMultiplier = 0.9;
+      if (difficulty === "easy") spawnDelayMultiplier = 1;
+      else if (difficulty === "hard") spawnDelayMultiplier = 0.75;
+      else if (difficulty === "very_hard") spawnDelayMultiplier = 0.6;
+      const nextDelay = (1800 + Math.random() * 1300) * spawnDelayMultiplier;
+      timeoutId = setTimeout(spawnLoop, nextDelay);
+    };
+    if (gameState === "playing") {
+      timeoutId = setTimeout(spawnLoop, 400);
+    }
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [gameState, difficulty]);
+  const handleItemFallOff = (item) => {
+    playSynthSound("miss");
+    setScore((prev) => prev - 20);
+    setConsecutiveCorrect(0);
+    const logEntry = {
+      id: `${item.activeId}_fall_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      itemName: item.name,
+      emoji: item.emoji,
+      selectedCategory: "",
+      correctCategory: item.category,
+      isCorrect: false,
+      scoreChange: -20,
+      timestamp: /* @__PURE__ */ new Date(),
+      tip: item.tip
+    };
+    setLogs((prev) => [logEntry, ...prev]);
+  };
+  const handleSort = (activeId, binCategory) => {
+    const targetItem = activeItemsRef.current.find((i) => i.activeId === activeId);
+    if (!targetItem) return;
+    updateActiveItems((prev) => prev.filter((i) => i.activeId !== activeId));
+    const isCorrect = targetItem.category === binCategory;
+    let pointsGained = isCorrect ? 60 : -30;
+    let nextStreak = isCorrect ? consecutiveCorrect + 1 : 0;
+    let comboTriggered = false;
+    if (isCorrect && nextStreak > 0 && nextStreak % 10 === 0) {
+      pointsGained += 30;
+      comboTriggered = true;
+    }
+    if (comboTriggered) {
+      playSynthSound("combo");
+      setShowComboAnimation(true);
+      setTimeout(() => setShowComboAnimation(false), 2e3);
+    } else if (isCorrect) {
+      playSynthSound("correct");
+    } else {
+      playSynthSound("wrong");
+    }
+    setScore((prev) => prev + pointsGained);
+    setAttempts((prev) => prev + 1);
+    setConsecutiveCorrect(nextStreak);
+    if (isCorrect) {
+      setCorrectCount((prev) => prev + 1);
+    }
+    const logEntry = {
+      id: `${activeId}_sort_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      itemName: targetItem.name,
+      emoji: targetItem.emoji,
+      selectedCategory: binCategory,
+      correctCategory: targetItem.category,
+      isCorrect,
+      scoreChange: pointsGained,
+      timestamp: /* @__PURE__ */ new Date(),
+      tip: targetItem.tip
+    };
+    setLogs((prev) => [logEntry, ...prev]);
+    if (selectedId === activeId) {
+      setSelectedId(null);
+    }
+  };
+  const handleSelectItem = (id) => {
+    initAudio();
+    setSelectedId(id);
+  };
+  const handleBinSelect = (binCategory) => {
+    if (selectedId) {
+      handleSort(selectedId, binCategory);
+    }
+  };
+  const endGame = async () => {
+    if (isEndingRef.current) return;
+    isEndingRef.current = true;
+    setGameState("finished");
+    playSynthSound("gameover");
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    if (physicsIntervalRef.current) clearInterval(physicsIntervalRef.current);
+    if (spawnTimeoutRef.current) clearTimeout(spawnTimeoutRef.current);
+    const currentNickname = nickname || "\uC9C0\uAD6C\uC218\uD638\uC790";
+    const currentScore = score;
+    const currentAttempts = attempts;
+    const currentCorrectCount = correctCount;
+    const accuracy = currentAttempts > 0 ? Math.round(currentCorrectCount / currentAttempts * 100) : 0;
+    const dateString = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+    const newLeaderboardEntry = {
+      id: gameSessionIdRef.current || void 0,
+      name: currentNickname,
+      score: currentScore,
+      attempts: currentAttempts,
+      accuracy,
+      date: dateString
+    };
+    try {
+      await saveLeaderboardEntry(newLeaderboardEntry);
+      setRefreshLeaderboard((prev) => prev + 1);
+    } catch (e) {
+      console.error("\uB7AD\uD0B9 \uB4F1\uB85D \uC911 \uC2E4\uD328:", e);
+    }
+  };
+  return /* @__PURE__ */ jsxs("div", { className: "min-h-screen bg-slate-50 dark:bg-slate-950 font-sans transition-colors duration-300", children: [
+    /* @__PURE__ */ jsx(AnimatePresence, { children: showComboAnimation && /* @__PURE__ */ jsxs(
+      motion.div,
+      {
+        initial: { opacity: 0, scale: 0.5, y: -50 },
+        animate: { opacity: 1, scale: 1.2, y: 0 },
+        exit: { opacity: 0, scale: 0.8, y: -20 },
+        className: "fixed top-12 left-1/2 -translate-x-1/2 z-50 bg-gradient-to-r from-yellow-500 via-orange-500 to-rose-500 text-white font-extrabold px-8 py-4 rounded-3xl shadow-2xl border-4 border-white text-center flex flex-col items-center gap-1",
+        children: [
+          /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1.5 text-2xl animate-bounce", children: [
+            /* @__PURE__ */ jsx(Flame, { size: 28, className: "fill-white" }),
+            /* @__PURE__ */ jsx("span", { children: "\uC5F0\uC18D 10\uAC1C \uC815\uB2F5!" }),
+            /* @__PURE__ */ jsx(Flame, { size: 28, className: "fill-white" })
+          ] }),
+          /* @__PURE__ */ jsx("span", { className: "text-sm font-semibold opacity-90", children: "\uBCF4\uB108\uC2A4 \uC810\uC218 +30\uC810 \uCD94\uAC00 \uC644\uB8CC! \u{1F525}" })
+        ]
+      }
+    ) }),
+    gameState === "lobby" && /* @__PURE__ */ jsx(NicknameModal, { onStartGame: startGame }),
+    /* @__PURE__ */ jsx("header", { className: "sticky top-0 z-40 bg-white border-b border-slate-200 px-6 py-4 shadow-xs", children: /* @__PURE__ */ jsxs("div", { className: "max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+        /* @__PURE__ */ jsx(
+          motion.div,
+          {
+            whileHover: { rotate: 15 },
+            className: "w-10 h-10 bg-emerald-500 rounded-lg flex items-center justify-center text-white text-2xl font-bold flex-shrink-0",
+            children: "\u267B\uFE0F"
+          }
+        ),
+        /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsx("h1", { className: "text-xl font-bold text-slate-900 tracking-tight", children: "\uC790\uC6D0 \uB9C8\uC2A4\uD130: \uBD84\uB9AC\uBC30\uCD9C \uCC4C\uB9B0\uC9C0" }),
+          /* @__PURE__ */ jsx("p", { className: "text-[10px] text-slate-400 font-extrabold uppercase tracking-widest mt-0.5", children: "Recycling Master Simulator" })
+        ] })
+      ] }),
+      gameState !== "lobby" && /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-4 sm:gap-6 md:gap-8 bg-slate-50 border border-slate-100 rounded-2xl px-4 py-2 sm:px-6", children: [
+        /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center sm:items-end", children: [
+          /* @__PURE__ */ jsx("span", { className: "text-[9px] uppercase font-bold tracking-wider text-slate-400", children: "\uD604\uC7AC \uC810\uC218" }),
+          /* @__PURE__ */ jsx("span", { className: `text-xl sm:text-2xl font-mono font-bold ${score >= 0 ? "text-emerald-600" : "text-rose-500"}`, children: String(score).padStart(4, "0") })
+        ] }),
+        /* @__PURE__ */ jsx("div", { className: "w-[1px] h-8 bg-slate-200" }),
+        /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center", children: [
+          /* @__PURE__ */ jsx("span", { className: "text-[9px] uppercase font-bold tracking-wider text-slate-400", children: "\uB0A8\uC740 \uC2DC\uAC04" }),
+          /* @__PURE__ */ jsxs("span", { className: `text-xl sm:text-2xl font-mono font-bold ${timeRemaining <= 10 ? "text-rose-500 animate-pulse" : "text-slate-800"}`, children: [
+            String(Math.floor(timeRemaining / 60)).padStart(2, "0"),
+            ":",
+            String(timeRemaining % 60).padStart(2, "0")
+          ] })
+        ] }),
+        /* @__PURE__ */ jsx("div", { className: "w-[1px] h-8 bg-slate-200" }),
+        /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center", children: [
+          /* @__PURE__ */ jsx("span", { className: "text-[9px] uppercase font-bold tracking-wider text-slate-400", children: "\uC5F0\uC18D \uC815\uB2F5" }),
+          /* @__PURE__ */ jsxs("span", { className: "text-xl sm:text-2xl font-mono font-bold text-amber-500", children: [
+            "\u{1F525} ",
+            String(consecutiveCorrect).padStart(2, "0")
+          ] })
+        ] }),
+        /* @__PURE__ */ jsx("div", { className: "w-[1px] h-8 bg-slate-200" }),
+        /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center", children: [
+          /* @__PURE__ */ jsx("span", { className: "text-[9px] uppercase font-bold tracking-wider text-slate-400", children: "\uC815\uD655\uB3C4" }),
+          /* @__PURE__ */ jsxs("span", { className: "text-xl sm:text-2xl font-mono font-bold text-indigo-500", children: [
+            "\u{1F3AF} ",
+            attempts > 0 ? Math.round(correctCount / attempts * 100) : 0,
+            "%"
+          ] })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+        nickname && /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1.5", children: [
+          /* @__PURE__ */ jsxs("span", { className: "text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-full hidden sm:inline-block", children: [
+            "\u{1F464} ",
+            nickname
+          ] }),
+          /* @__PURE__ */ jsx("span", { className: `text-[10px] font-extrabold uppercase px-2.5 py-1.5 rounded-full hidden sm:inline-block ${difficulty === "easy" ? "bg-emerald-100 text-emerald-700 border border-emerald-200 animate-pulse" : difficulty === "hard" ? "bg-amber-100 text-amber-700 border border-amber-200" : difficulty === "very_hard" ? "bg-rose-100 text-rose-700 border border-rose-200 animate-bounce" : "bg-blue-100 text-blue-700 border border-blue-200"}`, children: difficulty === "easy" ? "\uC26C\uC6C0 \u{1F476}" : difficulty === "hard" ? "\uC5B4\uB824\uC6C0 \u26A1" : difficulty === "very_hard" ? "\uB9E4\uC6B0 \uC5B4\uB824\uC6C0 \u{1F480}" : "\uBCF4\uD1B5 \u{1F680}" })
+        ] }),
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            onClick: () => setIsMuted(!isMuted),
+            className: "p-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-500 transition-all active:scale-95 cursor-pointer",
+            title: isMuted ? "\uC74C\uC18C\uAC70 \uD574\uC81C" : "\uC74C\uC18C\uAC70",
+            children: isMuted ? /* @__PURE__ */ jsx(VolumeX, { size: 16 }) : /* @__PURE__ */ jsx(Volume2, { size: 16 })
+          }
+        )
+      ] })
+    ] }) }),
+    /* @__PURE__ */ jsx("main", { className: "max-w-7xl mx-auto p-4 sm:p-6 space-y-6", children: gameState !== "lobby" && /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-1 lg:grid-cols-12 gap-6 items-start", children: [
+      /* @__PURE__ */ jsxs("div", { className: "lg:col-span-8 space-y-6", children: [
+        /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between", children: [
+          /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+            /* @__PURE__ */ jsx("span", { className: `w-2.5 h-2.5 rounded-full ${gameState === "playing" ? "bg-emerald-500 animate-ping" : "bg-slate-300"}` }),
+            /* @__PURE__ */ jsx("span", { className: "text-xs font-bold text-slate-600 dark:text-slate-400", children: gameState === "playing" ? "\uC2E4\uC2DC\uAC04 \uBD84\uB9AC\uC218\uAC70 \uC911" : gameState === "paused" ? "\uC77C\uC2DC \uC815\uC9C0\uB428" : "\uAC8C\uC784 \uC885\uB8CC" })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+            gameState === "playing" && /* @__PURE__ */ jsxs(
+              "button",
+              {
+                onClick: pauseGame,
+                className: "px-4 py-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-all active:scale-95 flex items-center gap-1.5 shadow-sm",
+                children: [
+                  /* @__PURE__ */ jsx(Pause, { size: 14 }),
+                  "\uC77C\uC2DC\uC815\uC9C0"
+                ]
+              }
+            ),
+            gameState === "paused" && /* @__PURE__ */ jsxs(
+              "button",
+              {
+                onClick: resumeGame,
+                className: "px-4 py-2 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 rounded-xl transition-all active:scale-95 flex items-center gap-1.5 shadow-md shadow-emerald-500/20",
+                children: [
+                  /* @__PURE__ */ jsx(Play, { size: 14 }),
+                  "\uB2E4\uC2DC \uC2DC\uC791 (\uC7AC\uAC1C)"
+                ]
+              }
+            ),
+            /* @__PURE__ */ jsxs(
+              "button",
+              {
+                onClick: restartGame,
+                className: "px-4 py-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-all active:scale-95 flex items-center gap-1.5 shadow-sm",
+                children: [
+                  /* @__PURE__ */ jsx(RotateCcw, { size: 14 }),
+                  "\uB2E4\uC2DC\uD558\uAE30"
+                ]
+              }
+            ),
+            /* @__PURE__ */ jsxs(
+              "button",
+              {
+                onClick: resetToLobby,
+                className: "px-4 py-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-all active:scale-95 flex items-center gap-1.5 shadow-sm",
+                children: [
+                  /* @__PURE__ */ jsx(Home, { size: 14 }),
+                  "\uCC98\uC74C\uBD80\uD130"
+                ]
+              }
+            )
+          ] })
+        ] }),
+        gameState === "playing" || gameState === "countdown" ? /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+          /* @__PURE__ */ jsx(
+            GameBelt,
+            {
+              activeItems,
+              selectedId,
+              onSelectItem: handleSelectItem,
+              onDragStart: updateDraggedId,
+              onDragUpdate: setHoveredBin,
+              onDragEnd: (activeId, bin) => {
+                updateDraggedId(null);
+                if (gameState === "countdown") return;
+                if (bin) {
+                  handleSort(activeId, bin);
+                }
+                setHoveredBin(null);
+              }
+            }
+          ),
+          gameState === "countdown" && /* @__PURE__ */ jsxs(
+            motion.div,
+            {
+              initial: { opacity: 0 },
+              animate: { opacity: 1 },
+              exit: { opacity: 0 },
+              className: "absolute inset-0 bg-slate-900/80 backdrop-blur-xs rounded-3xl flex flex-col items-center justify-center z-30",
+              children: [
+                /* @__PURE__ */ jsxs(
+                  motion.span,
+                  {
+                    initial: { scale: 2, opacity: 0 },
+                    animate: { scale: 1.1, opacity: 1 },
+                    transition: { type: "spring", stiffness: 180, damping: 12 },
+                    className: "text-7xl sm:text-8xl font-black text-emerald-400 drop-shadow-lg font-mono flex items-center gap-3",
+                    children: [
+                      "\u23F1\uFE0F ",
+                      countdown
+                    ]
+                  },
+                  countdown
+                ),
+                /* @__PURE__ */ jsx("span", { className: "text-xs sm:text-sm font-black text-slate-100 mt-2 tracking-wider animate-pulse", children: "\uBD84\uB9AC\uC218\uAC70\uD568 \uC704\uCE58\uB97C \uBA38\uB9BF\uC18D\uC73C\uB85C \uAE30\uC5B5\uD574 \uB450\uC138\uC694! \u{1F9E0}" })
+              ]
+            }
+          )
+        ] }) : gameState === "paused" ? /* @__PURE__ */ jsxs("div", { className: "w-full h-44 bg-slate-100/50 dark:bg-slate-900/50 rounded-3xl border-2 border-dashed border-slate-300 dark:border-slate-800 flex flex-col items-center justify-center gap-2", children: [
+          /* @__PURE__ */ jsx(Pause, { size: 36, className: "text-slate-400 animate-pulse" }),
+          /* @__PURE__ */ jsx("p", { className: "font-extrabold text-sm text-slate-600 dark:text-slate-400", children: "\uAC8C\uC784\uC774 \uC77C\uC2DC\uC815\uC9C0 \uC0C1\uD0DC\uC785\uB2C8\uB2E4" }),
+          /* @__PURE__ */ jsx(
+            "button",
+            {
+              onClick: resumeGame,
+              className: "px-4 py-2 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 rounded-xl transition-all active:scale-95",
+              children: "\uAC8C\uC784 \uACC4\uC18D\uD558\uAE30"
+            }
+          )
+        ] }) : /* @__PURE__ */ jsxs(
+          motion.div,
+          {
+            initial: { opacity: 0, scale: 0.95 },
+            animate: { opacity: 1, scale: 1 },
+            className: "w-full bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 text-white rounded-3xl p-8 border border-slate-800 shadow-2xl text-center space-y-6",
+            children: [
+              /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center gap-1.5", children: [
+                /* @__PURE__ */ jsx(
+                  motion.div,
+                  {
+                    animate: { rotate: [0, 10, -10, 0] },
+                    transition: { repeat: Infinity, duration: 4 },
+                    className: "text-5xl",
+                    children: "\u{1F3C6}"
+                  }
+                ),
+                /* @__PURE__ */ jsx("h2", { className: "text-2xl font-black tracking-tight mt-2", children: "\uC218\uACE0\uD558\uC168\uC2B5\uB2C8\uB2E4! \uBD84\uB9AC\uBC30\uCD9C \uC644\uB8CC!" }),
+                /* @__PURE__ */ jsxs("p", { className: "text-xs text-slate-400", children: [
+                  nickname,
+                  " \uB2D8\uC758 \uC5D0\uCF54 \uB9AC\uD3EC\uD2B8 \uACB0\uACFC\uB294 \uB2E4\uC74C\uACFC \uAC19\uC2B5\uB2C8\uB2E4."
+                ] })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-3 gap-3 max-w-md mx-auto", children: [
+                /* @__PURE__ */ jsxs("div", { className: "bg-white/5 border border-white/10 rounded-2xl p-4 text-center", children: [
+                  /* @__PURE__ */ jsx("span", { className: "text-[9px] font-bold text-slate-400 uppercase block mb-1", children: "\uCD5C\uC885 \uC810\uC218" }),
+                  /* @__PURE__ */ jsxs("span", { className: "text-xl font-black text-yellow-400", children: [
+                    score,
+                    "\uC810"
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "bg-white/5 border border-white/10 rounded-2xl p-4 text-center", children: [
+                  /* @__PURE__ */ jsx("span", { className: "text-[9px] font-bold text-slate-400 uppercase block mb-1", children: "\uBC30\uCD9C \uC2DC\uB3C4" }),
+                  /* @__PURE__ */ jsxs("span", { className: "text-xl font-black text-indigo-400", children: [
+                    attempts,
+                    "\uD68C"
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "bg-white/5 border border-white/10 rounded-2xl p-4 text-center", children: [
+                  /* @__PURE__ */ jsx("span", { className: "text-[9px] font-bold text-slate-400 uppercase block mb-1", children: "\uC815\uD655\uB3C4" }),
+                  /* @__PURE__ */ jsxs("span", { className: "text-xl font-black text-emerald-400", children: [
+                    attempts > 0 ? Math.round(correctCount / attempts * 100) : 0,
+                    "%"
+                  ] })
+                ] })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "p-4 bg-white/5 rounded-2xl border border-white/10 max-w-md mx-auto text-xs text-left leading-relaxed text-slate-300", children: [
+                /* @__PURE__ */ jsxs("p", { className: "font-bold text-slate-100 flex items-center gap-1.5 mb-1.5", children: [
+                  /* @__PURE__ */ jsx(Award, { size: 16, className: "text-yellow-400" }),
+                  "\uC131\uACF5\uC801\uC778 \uBBF8\uB798\uB97C \uC704\uD55C \uD55C \uAC78\uC74C"
+                ] }),
+                score >= 1e3 ? /* @__PURE__ */ jsxs("span", { children: [
+                  "\uB2F9\uC2E0\uC740 \uC644\uBCBD\uD55C ",
+                  /* @__PURE__ */ jsx("strong", { children: "\uCD08\uB85D\uC9C0\uAD6C\uC758 \uD658\uACBD \uD30C\uC218\uAFBC (Eco Champion)" }),
+                  "\uC785\uB2C8\uB2E4! \uC62C\uBC14\uB978 \uC4F0\uB808\uAE30 \uBD84\uB9AC\uBC30\uCD9C \uC0C1\uC2DD\uC774 \uC644\uBCBD\uD558\uAC8C \uB0B4\uC7AC\uD654\uB418\uC5B4 \uC788\uC2B5\uB2C8\uB2E4. \uCD5C\uACE0\uC758 \uB7AD\uCEE4\uB4E4\uACFC \uACBD\uC7C1\uD558\uC138\uC694!"
+                ] }) : score >= 600 ? /* @__PURE__ */ jsxs("span", { children: [
+                  "\uBA4B\uC838\uC694! ",
+                  /* @__PURE__ */ jsx("strong", { children: "\uC9C0\uAD6C\uC0B4\uB9AC\uBBF8 (Eco Helper)" }),
+                  "\uB85C\uC11C \uD6CC\uB96D\uD55C \uC790\uACA9\uC744 \uAC16\uCD94\uACE0 \uC788\uC2B5\uB2C8\uB2E4. \uCE6B\uC194, \uB2EC\uAC40\uAECD\uC9C8, \uAE68\uC9C4 \uBCD1\uACFC \uAC19\uC740 \uD5F7\uAC08\uB9AC\uAE30 \uC26C\uC6B4 \uC4F0\uB808\uAE30 \uBD84\uB9AC \uADDC\uCE59\uC744 \uC870\uAE08\uB9CC \uB354 \uBCF4\uC644\uD574 \uBA85\uC608\uC758 \uC804\uB2F9\uC5D0 \uC62C\uB77C\uBCF4\uC138\uC694!"
+                ] }) : /* @__PURE__ */ jsxs("span", { children: [
+                  "\uAD1C\uCC2E\uC2B5\uB2C8\uB2E4! ",
+                  /* @__PURE__ */ jsx("strong", { children: "\uC5D0\uCF54 \uBE44\uAE30\uB108 (Eco Beginner)" }),
+                  " \uB2E8\uACC4\uC785\uB2C8\uB2E4. \uC544\uB798\uC758 \uD788\uC2A4\uD1A0\uB9AC \uD53C\uB4DC\uBC31 \uB3C4\uAC10\uC744 \uBCF4\uBA74\uC11C \uC624\uB2F5 \uBC30\uCD9C \uD301\uC744 \uAF3C\uAF3C\uD788 \uBCF5\uC2B5\uD574 \uBCF4\uC138\uC694. \uD55C \uBC88 \uB354 \uB3C4\uC804\uD574\uC11C \uC810\uC218\uB97C \uC62C\uB9B4 \uC218 \uC788\uC2B5\uB2C8\uB2E4!"
+                ] })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "flex flex-wrap gap-3 justify-center", children: [
+                /* @__PURE__ */ jsxs(
+                  "button",
+                  {
+                    onClick: () => setShowLeaderboardModal(true),
+                    className: "px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-2xl shadow-lg hover:shadow-xl shadow-indigo-500/20 active:scale-98 transition-all inline-flex items-center gap-2 cursor-pointer",
+                    children: [
+                      /* @__PURE__ */ jsx(Trophy, { size: 16 }),
+                      "\uC2E4\uC2DC\uAC04 \uB7AD\uD0B9 \uD655\uC778"
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxs(
+                  "button",
+                  {
+                    onClick: restartGame,
+                    className: "px-8 py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold rounded-2xl shadow-lg hover:shadow-xl shadow-emerald-500/20 active:scale-98 transition-all inline-flex items-center gap-2 cursor-pointer",
+                    children: [
+                      "\uD55C \uBC88 \uB354 \uB3C4\uC804\uD558\uAE30",
+                      /* @__PURE__ */ jsx(RotateCcw, { size: 16 })
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxs(
+                  "button",
+                  {
+                    onClick: resetToLobby,
+                    className: "px-8 py-4 bg-slate-700 hover:bg-slate-600 text-white font-extrabold rounded-2xl shadow-lg hover:shadow-xl shadow-slate-500/20 active:scale-98 transition-all inline-flex items-center gap-2 cursor-pointer",
+                    children: [
+                      "\uCC98\uC74C\uBD80\uD130",
+                      /* @__PURE__ */ jsx(Home, { size: 16 })
+                    ]
+                  }
+                )
+              ] })
+            ]
+          }
+        ),
+        /* @__PURE__ */ jsx(
+          BinGrid,
+          {
+            onBinSelect: handleBinSelect,
+            activeSelectedId: selectedId,
+            hoveredBin
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsx("div", { className: "lg:col-span-4 space-y-6", children: /* @__PURE__ */ jsx(HistoryLog, { logs }) })
+    ] }) }),
+    /* @__PURE__ */ jsx(AnimatePresence, { children: showLeaderboardModal && /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs", children: /* @__PURE__ */ jsxs(
+      motion.div,
+      {
+        initial: { opacity: 0, scale: 0.95, y: 20 },
+        animate: { opacity: 1, scale: 1, y: 0 },
+        exit: { opacity: 0, scale: 0.95, y: 20 },
+        transition: { type: "spring", duration: 0.4 },
+        className: "w-full max-w-xl bg-slate-800 rounded-3xl overflow-hidden shadow-2xl border border-slate-700 relative flex flex-col max-h-[85vh]",
+        children: [
+          /* @__PURE__ */ jsx(
+            "button",
+            {
+              onClick: () => setShowLeaderboardModal(false),
+              className: "absolute top-4 right-4 text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-700 transition-all z-10 cursor-pointer",
+              children: /* @__PURE__ */ jsx(X, { size: 20 })
+            }
+          ),
+          /* @__PURE__ */ jsx("div", { className: "p-1 flex-1 overflow-y-auto", children: /* @__PURE__ */ jsx(Leaderboard, { refreshTrigger: refreshLeaderboard }) })
+        ]
+      }
+    ) }) }),
+    /* @__PURE__ */ jsxs("footer", { className: "mt-12 border-t border-slate-100 dark:border-slate-900 bg-white dark:bg-slate-950 py-8 text-center text-xs text-slate-400 space-y-2", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-center gap-1.5", children: [
+        /* @__PURE__ */ jsx(Heart, { size: 12, className: "text-rose-500 fill-rose-500 animate-pulse" }),
+        /* @__PURE__ */ jsx("span", { children: "\uC9C0\uAD6C\uB97C \uC9C0\uD0A4\uB294 \uC544\uB984\uB2E4\uC6B4 \uC0C1\uC2DD, \uC62C\uBC14\uB978 \uBD84\uB9AC\uC218\uAC70 \uBD84\uB9AC\uBC30\uCD9C \uAC8C\uC784" })
+      ] }),
+      /* @__PURE__ */ jsx("p", { className: "font-mono text-[10px]", children: "\xA9 2026 Eco Recycling Master Simulator. Powered by Antigravity AI build." })
+    ] })
+  ] });
+}
+
+// src/main.tsx
+/* import './index.css'; */
+import { jsx as jsx2 } from "react/jsx-runtime";
+createRoot(document.getElementById("root")).render(
+  /* @__PURE__ */ jsx2(StrictMode, { children: /* @__PURE__ */ jsx2(App, {}) })
+);
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+
+// 부팅 완료 시 로딩 화면 제거
+document.getElementById('boot-status').classList.add('hidden');
+</script>
+</body>
+</html>
